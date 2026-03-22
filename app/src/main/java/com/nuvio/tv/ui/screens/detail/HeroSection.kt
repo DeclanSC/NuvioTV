@@ -96,6 +96,7 @@ fun HeroContentSection(
     isMovieWatchedPending: Boolean,
     onToggleMovieWatched: () -> Unit,
     trailerAvailable: Boolean = false,
+    randomAvailable: Boolean = false,
     onTrailerClick: () -> Unit = {},
     hideLogoDuringTrailer: Boolean = false,
     mdbListRatings: MDBListRatings? = null,
@@ -255,7 +256,7 @@ fun HeroContentSection(
                             }
                         )
 
-                        if (randomEpisode != null && onRandomEpisodeClick != null && isSeriesApi) {
+                        if (randomAvailable && randomEpisode != null && onRandomEpisodeClick != null && isSeriesApi) {
                             ActionIconButton(
                                 icon = Icons.Default.Shuffle,
                                 contentDescription = "Play random episode",

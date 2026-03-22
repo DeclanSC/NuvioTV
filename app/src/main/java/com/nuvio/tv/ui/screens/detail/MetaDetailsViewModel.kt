@@ -146,6 +146,19 @@ class MetaDetailsViewModel @Inject constructor(
                     }
                 }
         }
+        viewModelScope.launch {
+            layoutPreferenceDataStore.detailPageRandomButtonEnabled
+                .distinctUntilChanged()
+                .collectLatest { enabled ->
+                    _uiState.update { state ->
+                        if (state.randomButtonEnabled == enabled) {
+                            state
+                        } else {
+                            state.copy(randomButtonEnabled = enabled)
+                        }
+                    }
+                }
+        }
     }
 
     private fun observeTraktCommentsAvailability() {

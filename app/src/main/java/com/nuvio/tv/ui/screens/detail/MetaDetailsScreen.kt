@@ -492,6 +492,7 @@ fun MetaDetailsScreen(
                     showTrailerControls = uiState.showTrailerControls,
                     hideLogoDuringTrailer = uiState.hideLogoDuringTrailer,
                     trailerButtonEnabled = uiState.trailerButtonEnabled,
+                    randomButtonEnabled = uiState.randomButtonEnabled,
                     trailerSeekToken = trailerSeekToken,
                     trailerSeekDeltaMs = trailerSeekDeltaMs,
                     onTrailerControlKey = { keyCode, action, repeatCount ->
@@ -661,6 +662,7 @@ private fun MetaDetailsContent(
     showTrailerControls: Boolean,
     hideLogoDuringTrailer: Boolean,
     trailerButtonEnabled: Boolean,
+    randomButtonEnabled: Boolean,
     trailerSeekToken: Int,
     trailerSeekDeltaMs: Long,
     onTrailerControlKey: (keyCode: Int, action: Int, repeatCount: Int) -> Boolean,
@@ -1259,6 +1261,7 @@ private fun MetaDetailsContent(
                         hideMetaInfoImdb = showMdbListImdb,
                         showFullReleaseDate = showFullReleaseDate,
                         trailerAvailable = trailerButtonEnabled && !trailerUrl.isNullOrBlank(),
+                        randomAvailable = randomButtonEnabled,
                         onTrailerClick = onTrailerButtonClick,
                         hideLogoDuringTrailer = hideLogoDuringTrailer,
                         isTrailerPlaying = isTrailerPlaying,

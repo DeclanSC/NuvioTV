@@ -41,6 +41,7 @@ data class LayoutSettingsUiState(
     val posterCardCornerRadiusDp: Int = 12,
     val blurUnwatchedEpisodes: Boolean = false,
     val detailPageTrailerButtonEnabled: Boolean = false,
+    val detailPageRandomButtonEnabled: Boolean = false,
     val preferExternalMetaAddonDetail: Boolean = false,
     val hideUnreleasedContent: Boolean = false,
     val showFullReleaseDate: Boolean = true
@@ -75,6 +76,7 @@ sealed class LayoutSettingsEvent {
     data class SetPosterCardCornerRadius(val cornerRadiusDp: Int) : LayoutSettingsEvent()
     data class SetBlurUnwatchedEpisodes(val enabled: Boolean) : LayoutSettingsEvent()
     data class SetDetailPageTrailerButtonEnabled(val enabled: Boolean) : LayoutSettingsEvent()
+    data class SetDetailPageRandomButtonEnabled(val enabled: Boolean) : LayoutSettingsEvent()
     data class SetPreferExternalMetaAddonDetail(val enabled: Boolean) : LayoutSettingsEvent()
     data class SetHideUnreleasedContent(val enabled: Boolean) : LayoutSettingsEvent()
     data class SetShowFullReleaseDate(val enabled: Boolean) : LayoutSettingsEvent()
@@ -212,6 +214,11 @@ class LayoutSettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            layoutPreferenceDataStore.detailPageRandomButtonEnabled.distinctUntilChanged().collectLatest { enabled ->
+                updateUiStateIfChanged { it.copy(detailPageRandomButtonEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
             layoutPreferenceDataStore.preferExternalMetaAddonDetail.distinctUntilChanged().collectLatest { enabled ->
                 updateUiStateIfChanged { it.copy(preferExternalMetaAddonDetail = enabled) }
             }
@@ -252,6 +259,7 @@ class LayoutSettingsViewModel @Inject constructor(
             is LayoutSettingsEvent.SetPosterCardCornerRadius -> setPosterCardCornerRadius(event.cornerRadiusDp)
             is LayoutSettingsEvent.SetBlurUnwatchedEpisodes -> setBlurUnwatchedEpisodes(event.enabled)
             is LayoutSettingsEvent.SetDetailPageTrailerButtonEnabled -> setDetailPageTrailerButtonEnabled(event.enabled)
+            is LayoutSettingsEvent.SetDetailPageRandomButtonEnabled -> setDetailPageRandomButtonEnabled(event.enabled)
             is LayoutSettingsEvent.SetPreferExternalMetaAddonDetail -> setPreferExternalMetaAddonDetail(event.enabled)
             is LayoutSettingsEvent.SetHideUnreleasedContent -> setHideUnreleasedContent(event.enabled)
             is LayoutSettingsEvent.SetShowFullReleaseDate -> setShowFullReleaseDate(event.enabled)
@@ -395,6 +403,13 @@ class LayoutSettingsViewModel @Inject constructor(
         if (_uiState.value.detailPageTrailerButtonEnabled == enabled) return
         viewModelScope.launch {
             layoutPreferenceDataStore.setDetailPageTrailerButtonEnabled(enabled)
+        }
+    }
+
+    private fun setDetailPageRandomButtonEnabled(enabled: Boolean) {
+        if (_uiState.value.detailPageRandomButtonEnabled == enabled) return
+        viewModelScope.launch {
+            layoutPreferenceDataStore.setDetailPageRandomButtonEnabled(enabled)
         }
     }
 
