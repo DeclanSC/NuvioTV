@@ -731,6 +731,7 @@ private fun MetaDetailsContent(
     var restoreFocusToken by rememberSaveable { mutableIntStateOf(0) }
     var initialHeroFocusRequested by rememberSaveable(meta.id) { mutableStateOf(false) }
     var showHeroPlayOptionsDialog by rememberSaveable(meta.id) { mutableStateOf(false) }
+    var manualPlayEpisode by remember { mutableStateOf<Video?>(null) }
     var initialDetailReturnFocusHandled by remember(
         meta.id,
         detailReturnEpisodeFocusRequest?.season,
@@ -1074,6 +1075,13 @@ private fun MetaDetailsContent(
         }
     }
 
+    val heroPlayEpisodeClick: (Video) -> Unit = remember(onEpisodeClick) {
+        { episode ->
+            markHeroRestore()
+            onEpisodeClick(episode)
+        }
+    }
+
     val episodeClick = remember(onEpisodeClick) {
         { video: Video ->
             markEpisodeRestore(video.id)
@@ -1225,9 +1233,17 @@ private fun MetaDetailsContent(
                         nextToWatch = nextToWatch,
                         onPlayClick = heroPlayClick,
                         onPlayLongPress = if (showManualPlayOption) {
-                            { showHeroPlayOptionsDialog = true }
-                        } else {
-                            null
+                            {
+                                manualPlayEpisode = heroVideo   // normal behavior
+                                showHeroPlayOptionsDialog = true
+                            }
+                        } else null,
+                        onRandomEpisodeClick = { episode ->
+                            heroPlayEpisodeClick(episode)
+                        },
+                        onRandomEpisodeLongPress = { episode ->
+                            manualPlayEpisode = episode
+                            showHeroPlayOptionsDialog = true
                         },
                         isInLibrary = isInLibrary,
                         onToggleLibrary = onToggleLibrary,
@@ -1539,14 +1555,27 @@ private fun MetaDetailsContent(
         if (showHeroPlayOptionsDialog) {
             PlayManualOverrideDialog(
                 title = meta.name,
-                subtitle = nextToWatch?.displayText ?: stringResource(R.string.hero_play),
+                subtitle = manualPlayEpisode?.let { episode ->
+                    stringResource(
+                        R.string.hero_play_episode,
+                        episode.season ?: 0,
+                        episode.episode ?: 0
+                    )
+                } ?: nextToWatch?.displayText ?: stringResource(R.string.hero_play),
                 onDismiss = { showHeroPlayOptionsDialog = false },
                 onPlayManually = {
                     showHeroPlayOptionsDialog = false
-                    heroPlayManualClick()
+
+                    val episode = manualPlayEpisode
+                    if (episode != null) {
+                        onEpisodeManualPlayClick(episode)
+                    } else {
+                        heroPlayManualClick()
+                    }
                 }
             )
         }
+
 
         selectedComment?.let { review ->
             CommentOverlay(

@@ -70,6 +70,7 @@ import com.nuvio.tv.ui.theme.NuvioColors
 import com.nuvio.tv.ui.theme.NuvioTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.platform.LocalContext
@@ -86,6 +87,8 @@ fun HeroContentSection(
     nextToWatch: NextToWatch?,
     onPlayClick: () -> Unit,
     onPlayLongPress: (() -> Unit)? = null,
+    onRandomEpisodeClick: ((Video) -> Unit)? = null,
+    onRandomEpisodeLongPress: ((Video) -> Unit)? = null,
     isInLibrary: Boolean,
     onToggleLibrary: () -> Unit,
     onLibraryLongPress: () -> Unit,
@@ -130,6 +133,14 @@ fun HeroContentSection(
         context = context,
         rawRes = com.nuvio.tv.R.raw.trailer_play_button
     )
+    val randomEpisode = remember(meta.videos) {
+        meta.videos
+            .filter {
+                it.season != null && it.season > 0 &&
+                        it.episode != null && it.episode > 0
+            }
+            .randomOrNull()
+    }
     val strCreator = stringResource(R.string.hero_creator)
     val strDirector = stringResource(R.string.hero_director)
     val strWriter = stringResource(R.string.hero_writer)
@@ -243,6 +254,20 @@ fun HeroContentSection(
                                 onPlayFocusRestored()
                             }
                         )
+
+                        if (randomEpisode != null && onRandomEpisodeClick != null && isSeriesApi) {
+                            ActionIconButton(
+                                icon = Icons.Default.Shuffle,
+                                contentDescription = "Play random episode",
+                                onClick = {
+                                    onRandomEpisodeClick(randomEpisode)
+                                },
+                                onLongPress = {
+                                    onRandomEpisodeLongPress?.invoke(randomEpisode)
+                                },
+                                onFocused = onHeroActionFocused
+                            )
+                        }
 
                         ActionIconButton(
                             icon = if (isInLibrary) Icons.Default.Check else null,
