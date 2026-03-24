@@ -50,6 +50,8 @@
     <string name="continue_watching">Continue Watching</string>
     <string name="cw_upcoming">Upcoming</string>
     <string name="cw_next_up">Next Up</string>
+    <string name="cw_new_episode">New Episode</string>
+    <string name="cw_new_season">New Season</string>
     <string name="cw_resume">Resume</string>
     <string name="cw_percent_watched">%1$d%% watched</string>
     <string name="cw_hours_min_left">%1$dh %2$dm left</string>
@@ -442,6 +444,8 @@
     <string name="layout_modern_sidebar_sub">Enable floating sidebar navigation.</string>
     <string name="layout_modern_sidebar_blur">Modern Sidebar Blur</string>
     <string name="layout_modern_sidebar_blur_sub">Toggle blur effect for modern sidebar surfaces.</string>
+    <string name="layout_fullscreen_hero_backdrop">Fullscreen Hero Backdrop</string>
+    <string name="layout_fullscreen_hero_backdrop_sub">Expand the hero backdrop to fill the entire screen.</string>
     <string name="layout_show_hero">Show Hero Section</string>
     <string name="layout_show_hero_sub">Display hero carousel at top of home.</string>
     <string name="layout_show_discover">Show Discover in Search</string>
@@ -551,6 +555,8 @@
     <string name="tmdb_enable_subtitle">Use TMDB as a metadata source to enhance addon data</string>
     <string name="tmdb_modern_home_title">Enable on Modern Home</string>
     <string name="tmdb_modern_home_subtitle">Also apply TMDB enrichment to Modern Home hero and focused cards</string>
+    <string name="tmdb_enrich_continue_watching_title">Enrich Continue Watching</string>
+    <string name="tmdb_enrich_continue_watching_subtitle">Apply TMDB enrichment to Continue Watching items</string>
     <string name="tmdb_language_title">Language</string>
     <string name="tmdb_language_subtitle">TMDB metadata language for title, logo, and enabled fields</string>
     <string name="tmdb_artwork_title">Artwork</string>
