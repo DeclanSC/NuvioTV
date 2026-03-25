@@ -75,6 +75,7 @@ internal fun PlayerRuntimeController.stopProgressUpdates() {
 }
 
 internal fun PlayerRuntimeController.startWatchProgressSaving() {
+    if (isRandom) return
     watchProgressSaveJob?.cancel()
     watchProgressSaveJob = scope.launch {
         while (isActive) {
@@ -90,6 +91,7 @@ internal fun PlayerRuntimeController.stopWatchProgressSaving() {
 }
 
 internal fun PlayerRuntimeController.saveWatchProgressIfNeeded() {
+    if (isRandom) return
     if (!hasRenderedFirstFrame) return
     val currentPosition = _exoPlayer?.currentPosition ?: return
     val duration = getEffectiveDuration(currentPosition)
@@ -102,6 +104,7 @@ internal fun PlayerRuntimeController.saveWatchProgressIfNeeded() {
 }
 
 internal fun PlayerRuntimeController.saveWatchProgress() {
+    if (isRandom) return
     if (!hasRenderedFirstFrame) return
     val currentPosition = _exoPlayer?.currentPosition ?: return
     val duration = getEffectiveDuration(currentPosition)
@@ -120,7 +123,8 @@ internal fun PlayerRuntimeController.getEffectiveDuration(position: Long): Long 
 }
 
 internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, duration: Long, syncRemote: Boolean = true) {
-    
+    if (isRandom) return
+
     if (contentId.isNullOrEmpty() || contentType.isNullOrEmpty()) return
     
     if (position < 1000) return
@@ -158,6 +162,14 @@ internal fun PlayerRuntimeController.currentPlaybackProgressPercent(): Float {
 }
 
 internal fun PlayerRuntimeController.refreshScrobbleItem() {
+    if (isRandom) {
+        currentScrobbleItem = null
+        hasSentScrobbleStartForCurrentItem = false
+        hasRequestedScrobbleStartForCurrentItem = false
+        scrobbleStartRequestGeneration++
+        hasSentCompletionScrobbleForCurrentItem = false
+        return
+    }
     currentScrobbleItem = buildScrobbleItem()
     hasSentScrobbleStartForCurrentItem = false
     hasRequestedScrobbleStartForCurrentItem = false
@@ -166,6 +178,7 @@ internal fun PlayerRuntimeController.refreshScrobbleItem() {
 }
 
 internal fun PlayerRuntimeController.buildScrobbleItem(): TraktScrobbleItem? {
+    if (isRandom) return null
     val rawContentId = contentId ?: return null
     val parsedIds = parseContentIds(rawContentId)
     val ids = toTraktIds(parsedIds)
@@ -203,6 +216,7 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TraktScrobbleItem? {
 }
 
 internal fun PlayerRuntimeController.emitScrobbleStart() {
+    if (isRandom) return
     val item = currentScrobbleItem ?: buildScrobbleItem().also { currentScrobbleItem = it }
     if (item == null) return
     if (hasRequestedScrobbleStartForCurrentItem) return
@@ -221,6 +235,7 @@ internal fun PlayerRuntimeController.emitScrobbleStart() {
 }
 
 internal fun PlayerRuntimeController.emitScrobbleStop(progressPercent: Float? = null) {
+    if (isRandom) return
     val item = currentScrobbleItem
     if (item == null) return
 
@@ -240,6 +255,7 @@ internal fun PlayerRuntimeController.emitScrobbleStop(progressPercent: Float? = 
 }
 
 internal fun PlayerRuntimeController.emitPauseScrobbleStop(progressPercent: Float) {
+    if (isRandom) return
     if (progressPercent < 1f || progressPercent >= 80f) return
     val item = currentScrobbleItem
     if (item == null) return
@@ -257,6 +273,7 @@ internal fun PlayerRuntimeController.emitPauseScrobbleStop(progressPercent: Floa
 }
 
 internal fun PlayerRuntimeController.emitCompletionScrobbleStop(progressPercent: Float) {
+    if (isRandom) return
     if (progressPercent < 80f || hasSentCompletionScrobbleForCurrentItem) return
     hasSentCompletionScrobbleForCurrentItem = true
     emitScrobbleStop(progressPercent = progressPercent)
@@ -269,11 +286,13 @@ internal fun PlayerRuntimeController.emitStopScrobbleForCurrentProgress() {
 }
 
 internal fun PlayerRuntimeController.flushPlaybackSnapshotForSwitchOrExit() {
+    if (isRandom) return
     emitStopScrobbleForCurrentProgress()
     saveWatchProgress()
 }
 
 internal fun PlayerRuntimeController.scheduleProgressSyncAfterSeek() {
+    if (isRandom) return
     seekProgressSyncJob?.cancel()
     seekProgressSyncJob = scope.launch {
         delay(seekProgressSyncDebounceMs)

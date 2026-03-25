@@ -454,6 +454,26 @@ fun NuvioNavHost(
             StreamScreen(
                 isRandom = isRandom,
                 onBackPress = {
+                    if (isRandom) {
+                        // Random mode: go straight to detail and from detail to home on next back
+                        val contentId = streamArgs?.getString("contentId").orEmpty()
+                        if (contentId.isNotBlank()) {
+                            val contentType = streamArgs?.getString("contentType").orEmpty()
+                            navController.navigate(
+                                Screen.Detail.createRoute(
+                                    itemId = contentId,
+                                    itemType = contentType,
+                                    addonBaseUrl = null,
+                                    returnToHomeOnBack = true   // force home on back from detail
+                                )
+                            ) {
+                                popUpTo(Screen.Stream.route) { inclusive = true }
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                        return@StreamScreen
+                    }
                     val streamContentType = streamArgs?.getString("contentType").orEmpty()
                     val streamContentId = streamArgs?.getString("contentId").orEmpty()
                     val season = streamArgs?.getString("season")?.toIntOrNull()
@@ -695,6 +715,26 @@ fun NuvioNavHost(
             PlayerScreen(
                 isRandom = isRandom,
                 onBackPress = { currentSeason, currentEpisode, autoPlayEnabled ->
+                    if (isRandom) {
+                        // Random mode: go straight to detail and from detail to home on next back
+                        val contentId = args?.getString("contentId").orEmpty()
+                        if (contentId.isNotBlank()) {
+                            val contentType = args?.getString("contentType").orEmpty()
+                            navController.navigate(
+                                Screen.Detail.createRoute(
+                                    itemId = contentId,
+                                    itemType = contentType,
+                                    addonBaseUrl = null,
+                                    returnToHomeOnBack = true   // force home on back from detail
+                                )
+                            ) {
+                                popUpTo(Screen.Player.route) { inclusive = true }
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                        return@PlayerScreen
+                    }
                     val args = backStackEntry.arguments
                     val initialSeason = args?.getString("season")?.toIntOrNull()
                     val initialEpisode = args?.getString("episode")?.toIntOrNull()
@@ -824,7 +864,8 @@ fun NuvioNavHost(
                             contentName = args?.getString("contentName"),
                             runtime = null,
                             returnToDetailOnBack = returnToDetailOnBack,
-                            returnToHomeOnBack = returnToHomeOnBack
+                            returnToHomeOnBack = returnToHomeOnBack,
+                            isRandom = isRandom
                         )
                         navController.navigate(route) {
                             popUpTo(Screen.Player.route) { inclusive = true }
@@ -837,42 +878,94 @@ fun NuvioNavHost(
                         }
                     }
                 },
-                onPlaybackErrorBack = {
-                    val returnedToStream = navController.popBackStack(Screen.Stream.route, inclusive = false)
-                    if (!returnedToStream) {
+                onPlaybackErrorBack = { videoId, season, episode, episodeTitle ->
+                    if (isRandom) {
                         val args = backStackEntry.arguments
-                        val videoId = args?.getString("videoId").orEmpty()
                         val contentType = args?.getString("contentType").orEmpty()
                         val title = args?.getString("title").orEmpty()
+                        val contentId = args?.getString("contentId").orEmpty()
+                        val contentName = args?.getString("contentName")
+                        val poster = args?.getString("poster")
+                        val backdrop = args?.getString("backdrop")
+                        val logo = args?.getString("logo")
+                        val year = args?.getString("year")
+                        val returnToDetailOnBack = args?.getString("returnToDetailOnBack")?.toBooleanStrictOrNull() == true
+                        val returnToHomeOnBack = args?.getString("returnToHomeOnBack")?.toBooleanStrictOrNull() == true
 
-                        if (videoId.isBlank() || contentType.isBlank() || title.isBlank()) {
-                            navController.popBackStack()
-                        } else {
-                            val route = Screen.Stream.createRoute(
-                                videoId = videoId,
-                                contentType = contentType,
-                                title = title,
-                                poster = args?.getString("poster"),
-                                backdrop = args?.getString("backdrop"),
-                                logo = args?.getString("logo"),
-                                season = args?.getString("season")?.toIntOrNull(),
-                                episode = args?.getString("episode")?.toIntOrNull(),
-                                episodeName = args?.getString("episodeTitle"),
-                                genres = null,
-                                year = args?.getString("year"),
-                                contentId = args?.getString("contentId"),
-                                contentName = args?.getString("contentName"),
-                                runtime = null,
-                                manualSelection = true,
-                                returnToDetailOnBack = args?.getString("returnToDetailOnBack")
-                                    ?.toBooleanStrictOrNull() == true,
-                                returnToHomeOnBack = args?.getString("returnToHomeOnBack")
-                                    ?.toBooleanStrictOrNull() == true
-                            )
+                        val streamRoute = Screen.Stream.createRoute(
+                            videoId = videoId,
+                            contentType = contentType,
+                            title = title,
+                            poster = poster,
+                            backdrop = backdrop,
+                            logo = logo,
+                            season = season,
+                            episode = episode,
+                            episodeName = episodeTitle,
+                            year = year,
+                            contentId = contentId.takeIf { it.isNotBlank() },
+                            contentName = contentName,
+                            manualSelection = true,
+                            returnToDetailOnBack = returnToDetailOnBack,
+                            returnToHomeOnBack = returnToHomeOnBack,
+                            isRandom = true
+                        )
 
-                            navController.navigate(route) {
-                                popUpTo(Screen.Player.route) { inclusive = true }
+                        val detailRoute = Screen.Detail.createRoute(
+                            itemId = contentId,
+                            itemType = contentType,
+                            addonBaseUrl = null,
+                            returnToHomeOnBack = true
+                        )
+
+                        var poppedToDetail = navController.popBackStack(Screen.Detail.route, inclusive = false)
+
+                        if (!poppedToDetail) {
+                            navController.navigate(detailRoute) {
+                                popUpTo(0) { inclusive = true }
                                 launchSingleTop = true
+                            }
+                        }
+
+                        navController.navigate(streamRoute) {
+                            launchSingleTop = true
+                        }
+                    } else {
+                        val returnedToStream = navController.popBackStack(Screen.Stream.route, inclusive = false)
+                        if (!returnedToStream) {
+                            val args = backStackEntry.arguments
+                            val videoId = args?.getString("videoId").orEmpty()
+                            val contentType = args?.getString("contentType").orEmpty()
+                            val title = args?.getString("title").orEmpty()
+
+                            if (videoId.isBlank() || contentType.isBlank() || title.isBlank()) {
+                                navController.popBackStack()
+                            } else {
+                                val route = Screen.Stream.createRoute(
+                                    videoId = videoId,
+                                    contentType = contentType,
+                                    title = title,
+                                    poster = args?.getString("poster"),
+                                    backdrop = args?.getString("backdrop"),
+                                    logo = args?.getString("logo"),
+                                    season = args?.getString("season")?.toIntOrNull(),
+                                    episode = args?.getString("episode")?.toIntOrNull(),
+                                    episodeName = args?.getString("episodeTitle"),
+                                    genres = null,
+                                    year = args?.getString("year"),
+                                    contentId = args?.getString("contentId"),
+                                    contentName = args?.getString("contentName"),
+                                    runtime = null,
+                                    manualSelection = true,
+                                    returnToDetailOnBack = args?.getString("returnToDetailOnBack")?.toBooleanStrictOrNull() == true,
+                                    returnToHomeOnBack = args?.getString("returnToHomeOnBack")?.toBooleanStrictOrNull() == true,
+                                    isRandom = false
+                                )
+
+                                navController.navigate(route) {
+                                    popUpTo(Screen.Player.route) { inclusive = true }
+                                    launchSingleTop = true
+                                }
                             }
                         }
                     }

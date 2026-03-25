@@ -77,6 +77,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.painter.Painter
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
+import com.nuvio.tv.ui.screens.player.PlayerNextEpisodeRules
 import java.util.Locale
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -136,9 +137,10 @@ fun HeroContentSection(
     )
     val randomEpisode = remember(meta.videos) {
         meta.videos
-            .filter {
-                it.season != null && it.season > 0 &&
-                        it.episode != null && it.episode > 0
+            .filter { video ->
+                video.season != null && video.season > 0 &&
+                        video.episode != null && video.episode > 0 &&
+                        PlayerNextEpisodeRules.hasEpisodeAired(video.released)
             }
             .randomOrNull()
     }
@@ -256,20 +258,6 @@ fun HeroContentSection(
                             }
                         )
 
-                        if (randomAvailable && randomEpisode != null && onRandomEpisodeClick != null && isSeriesApi) {
-                            ActionIconButton(
-                                icon = Icons.Default.Shuffle,
-                                contentDescription = "Play random episode",
-                                onClick = {
-                                    onRandomEpisodeClick(randomEpisode)
-                                },
-                                onLongPress = {
-                                    onRandomEpisodeLongPress?.invoke(randomEpisode)
-                                },
-                                onFocused = onHeroActionFocused
-                            )
-                        }
-
                         ActionIconButton(
                             icon = if (isInLibrary) Icons.Default.Check else null,
                             painter = if (!isInLibrary) {
@@ -300,6 +288,20 @@ fun HeroContentSection(
                                 selected = isMovieWatched,
                                 selectedContainerColor = Color.White,
                                 selectedContentColor = Color.Black,
+                                onFocused = onHeroActionFocused
+                            )
+                        }
+
+                        if (randomAvailable && randomEpisode != null && onRandomEpisodeClick != null && isSeriesApi) {
+                            ActionIconButton(
+                                icon = Icons.Default.Shuffle,
+                                contentDescription = "Play random episode",
+                                onClick = {
+                                    onRandomEpisodeClick(randomEpisode)
+                                },
+                                onLongPress = {
+                                    onRandomEpisodeLongPress?.invoke(randomEpisode)
+                                },
                                 onFocused = onHeroActionFocused
                             )
                         }

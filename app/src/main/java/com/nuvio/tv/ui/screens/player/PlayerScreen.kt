@@ -117,10 +117,13 @@ import kotlinx.coroutines.delay
 fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel(),
     onBackPress: (currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean) -> Unit,
-    onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, false) },
+    onPlaybackErrorBack: (videoId: String, season: Int?, episode: Int?, episodeTitle: String?) -> Unit = { _, _, _, _ -> onBackPress(null, null, false) },
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?) -> Unit)? = null,
     isRandom: Boolean
 ) {
+    LaunchedEffect(isRandom) {
+        viewModel.setIsRandom(isRandom)
+    }
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     val containerFocusRequester = remember { FocusRequester() }
@@ -138,7 +141,8 @@ fun PlayerScreen(
     }
     val exitPlayerFromError: () -> Unit = {
         viewModel.stopAndRelease()
-        onPlaybackErrorBack()
+        val info = viewModel.getCurrentEpisodeInfo()
+        onPlaybackErrorBack(info.videoId, info.season, info.episode, info.episodeTitle)
     }
 
     val handleBackPress = {
@@ -606,7 +610,10 @@ fun PlayerScreen(
         if (uiState.error != null) {
             ErrorOverlay(
                 message = uiState.error!!,
-                onBack = exitPlayerFromError
+                onBack = {
+                    val info = viewModel.getCurrentEpisodeInfo()
+                    onPlaybackErrorBack(info.videoId, info.season, info.episode, info.episodeTitle)
+                }
             )
         }
 

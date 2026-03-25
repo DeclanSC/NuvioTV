@@ -32,13 +32,18 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
             )
         }
         initializePlayer(url, headers)
-        if (loadSavedProgress) {
+        if (loadSavedProgress && !isRandom) {
             loadSavedProgressFor(currentSeason, currentEpisode)
         }
     }
 }
 
 internal suspend fun PlayerRuntimeController.warmTraktEpisodeMappingForCurrentPlayback() {
+    if (isRandom) {
+        currentTraktEpisodeMapping = null
+        currentTraktEpisodeMappingKey = null
+        return
+    }
     val normalizedType = contentType?.lowercase()
     if (normalizedType !in listOf("series", "tv")) {
         currentTraktEpisodeMapping = null

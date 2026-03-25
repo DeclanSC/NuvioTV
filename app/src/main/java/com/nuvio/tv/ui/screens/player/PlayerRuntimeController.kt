@@ -137,6 +137,14 @@ class PlayerRuntimeController(
     fun getCurrentStreamUrl(): String = currentStreamUrl
     fun getCurrentHeaders(): Map<String, String> = currentHeaders
 
+    fun setIsRandom(random: Boolean) {
+        if (isRandom != random) {
+            isRandom = random
+            // Re‑evaluate the next episode now that the mode has changed
+            recomputeNextEpisode(resetVisibility = true)
+        }
+    }
+
     fun stopAndRelease() {
         releasePlayer()
     }
@@ -225,7 +233,7 @@ class PlayerRuntimeController(
     internal var nextEpisodeThresholdMinutesBeforeEndSetting: Float = 2f
     internal var currentStreamBingeGroup: String? = navigationArgs.bingeGroup
     internal var hasInitializedAudioAmplificationForSession: Boolean = false
-
+    internal var isRandom: Boolean = false
     internal var lastBufferLogTimeMs: Long = 0L
     
     internal val gainAudioProcessor = GainAudioProcessor()
@@ -261,7 +269,7 @@ class PlayerRuntimeController(
     }
 
     init {
-        if (!navigationArgs.startFromBeginning) {
+        if (!isRandom && !navigationArgs.startFromBeginning) {
             loadSavedProgressFor(currentSeason, currentEpisode)
         }
         fetchParentalGuide(contentId, contentType, currentSeason, currentEpisode)
