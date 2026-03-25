@@ -222,7 +222,39 @@ fun MetaDetailsScreen(
         genres: String?,
         year: String?,
         runtime: Int?
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> }
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    onRandomPlayClick: (
+        videoId: String,
+        contentType: String,
+        contentId: String,
+        title: String,
+        poster: String?,
+        backdrop: String?,
+        logo: String?,
+        season: Int?,
+        episode: Int?,
+        episodeName: String?,
+        genres: String?,
+        year: String?,
+        runtime: Int?,
+        isRandom: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    onRandomManualPlayClick: (
+        videoId: String,
+        contentType: String,
+        contentId: String,
+        title: String,
+        poster: String?,
+        backdrop: String?,
+        logo: String?,
+        season: Int?,
+        episode: Int?,
+        episodeName: String?,
+        genres: String?,
+        year: String?,
+        runtime: Int?,
+        isRandom: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val effectiveAutoplayEnabled by viewModel.effectiveAutoplayEnabled.collectAsStateWithLifecycle(
@@ -466,6 +498,42 @@ fun MetaDetailsScreen(
                             null
                         )
                     },
+                    onRandomPlayClick = { video ->
+                        onRandomPlayClick(
+                            video.id,
+                            meta.apiType,
+                            meta.id,
+                            meta.name,
+                            video.thumbnail ?: meta.poster,
+                            meta.backdropUrl,
+                            meta.logo,
+                            video.season,
+                            video.episode,
+                            video.title,
+                            null,
+                            null,
+                            video.runtime,
+                            true
+                        )
+                    },
+                    onRandomManualPlayClick = { video ->
+                        onRandomManualPlayClick(
+                            video.id,
+                            meta.apiType,
+                            meta.id,
+                            meta.name,
+                            video.thumbnail ?: meta.poster,
+                            meta.backdropUrl,
+                            meta.logo,
+                            video.season,
+                            video.episode,
+                            video.title,
+                            null,
+                            null,
+                            video.runtime,
+                            true
+                        )
+                    },
                     showManualPlayOption = effectiveAutoplayEnabled,
                     onPlayButtonFocused = { viewModel.onEvent(MetaDetailsEvent.OnPlayButtonFocused) },
                     onToggleLibrary = { viewModel.onEvent(MetaDetailsEvent.OnToggleLibrary) },
@@ -646,6 +714,8 @@ private fun MetaDetailsContent(
     onEpisodeManualPlayClick: (Video) -> Unit,
     onPlayClick: (String) -> Unit,
     onPlayManuallyClick: (String) -> Unit,
+    onRandomPlayClick: (Video) -> Unit,
+    onRandomManualPlayClick: (Video) -> Unit,
     showManualPlayOption: Boolean,
     onPlayButtonFocused: () -> Unit,
     onToggleLibrary: () -> Unit,
@@ -685,6 +755,7 @@ private fun MetaDetailsContent(
         meta.videos.firstOrNull { it.id == defaultVideoId && it.available != false }
     }
     val nextEpisode = remember(episodesForSeason) { episodesForSeason.firstOrNull() }
+    var manualPlayIsRandom by remember { mutableStateOf(false) }
     val heroVideo = remember(meta.videos, nextToWatch, nextEpisode, defaultSeriesVideo, isSeries) {
         if (!isSeries) return@remember null
         val byId = nextToWatch?.nextVideoId?.let { id ->
@@ -1241,10 +1312,11 @@ private fun MetaDetailsContent(
                             }
                         } else null,
                         onRandomEpisodeClick = { episode ->
-                            heroPlayEpisodeClick(episode)
+                            onRandomPlayClick(episode)
                         },
                         onRandomEpisodeLongPress = { episode ->
                             manualPlayEpisode = episode
+                            manualPlayIsRandom = true
                             showHeroPlayOptionsDialog = true
                         },
                         isInLibrary = isInLibrary,
@@ -1565,16 +1637,26 @@ private fun MetaDetailsContent(
                         episode.episode ?: 0
                     )
                 } ?: nextToWatch?.displayText ?: stringResource(R.string.hero_play),
-                onDismiss = { showHeroPlayOptionsDialog = false },
+                onDismiss = {
+                    showHeroPlayOptionsDialog = false
+                    manualPlayIsRandom = false
+                    manualPlayEpisode = null
+                },
                 onPlayManually = {
                     showHeroPlayOptionsDialog = false
-
                     val episode = manualPlayEpisode
                     if (episode != null) {
-                        onEpisodeManualPlayClick(episode)
+                        if (manualPlayIsRandom) {
+                            onRandomManualPlayClick(episode)
+                        } else {
+                            onEpisodeManualPlayClick(episode)
+                        }
                     } else {
+                        // Movie case (non‑series) – only occurs when manualPlayIsRandom is false
                         heroPlayManualClick()
                     }
+                    manualPlayEpisode = null
+                    manualPlayIsRandom = false
                 }
             )
         }

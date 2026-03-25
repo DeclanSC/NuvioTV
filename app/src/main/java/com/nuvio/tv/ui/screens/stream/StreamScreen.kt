@@ -107,7 +107,8 @@ fun StreamScreen(
     viewModel: StreamScreenViewModel = hiltViewModel(),
     onBackPress: () -> Unit,
     onStreamSelected: (StreamPlaybackInfo) -> Unit,
-    onAutoPlayResolved: (StreamPlaybackInfo) -> Unit
+    onAutoPlayResolved: (StreamPlaybackInfo) -> Unit,
+    isRandom: Boolean
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val playerPreference by viewModel.playerPreference.collectAsStateWithLifecycle(
@@ -299,7 +300,7 @@ fun StreamScreen(
 @Composable
 private fun StreamBackdrop(
     backdrop: String?,
-    isLoading: Boolean
+    isLoading: Boolean,
 ) {
     val context = LocalContext.current
     val backgroundColor = NuvioColors.Background

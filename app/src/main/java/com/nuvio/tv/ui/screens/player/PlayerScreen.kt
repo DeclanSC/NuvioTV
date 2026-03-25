@@ -118,7 +118,8 @@ fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel(),
     onBackPress: (currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean) -> Unit,
     onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, false) },
-    onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?) -> Unit)? = null
+    onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?) -> Unit)? = null,
+    isRandom: Boolean
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
