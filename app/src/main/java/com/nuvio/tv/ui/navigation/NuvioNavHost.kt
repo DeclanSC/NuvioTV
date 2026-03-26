@@ -849,7 +849,7 @@ fun NuvioNavHost(
                                             year = args?.getString("year"),
                                             contentId = contentId.takeIf { it.isNotBlank() },
                                             contentName = args?.getString("contentName"),
-                                            returnToDetailOnBack = returnToDetailOnBack,
+                                            manualSelection = true,returnToDetailOnBack = returnToDetailOnBack,
                                             returnToHomeOnBack = returnToHomeOnBack
                                         )
                                     ) {
