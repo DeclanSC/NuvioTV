@@ -300,7 +300,7 @@ fun StreamScreen(
 @Composable
 private fun StreamBackdrop(
     backdrop: String?,
-    isLoading: Boolean,
+    isLoading: Boolean
 ) {
     val context = LocalContext.current
     val backgroundColor = NuvioColors.Background
