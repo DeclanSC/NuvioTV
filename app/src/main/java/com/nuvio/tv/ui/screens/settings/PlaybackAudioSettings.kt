@@ -52,6 +52,7 @@ import androidx.tv.material3.Text
 import com.nuvio.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
 import com.nuvio.tv.data.local.displayName
 import com.nuvio.tv.data.local.AudioLanguageOption
+import com.nuvio.tv.data.local.HdrPlaybackCompatibilityMode
 import com.nuvio.tv.data.local.MpvHardwareDecodeMode
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.TrailerSettings
@@ -64,6 +65,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onShowAudioLanguageDialog: () -> Unit,
     onShowSecondaryAudioLanguageDialog: () -> Unit,
     onShowDecoderPriorityDialog: () -> Unit,
+    onShowHdrPlaybackCompatibilityModeDialog: () -> Unit,
     onShowMpvHardwareDecodeModeDialog: () -> Unit,
     onSetTrailerEnabled: (Boolean) -> Unit,
     onSetTrailerDelaySeconds: (Int) -> Unit,
@@ -237,6 +239,25 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
         )
     }
 
+    item(key = "audio_hdr_playback_compatibility_mode") {
+        val hdrPlaybackCompatibilityModeName = when (playerSettings.hdrPlaybackCompatibilityMode) {
+            HdrPlaybackCompatibilityMode.OFF -> stringResource(R.string.audio_hdr_compat_mode_off)
+            HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR ->
+                stringResource(R.string.audio_hdr_compat_mode_tone_map)
+            HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR ->
+                stringResource(R.string.audio_hdr_compat_mode_force_sdr)
+        }
+
+        NavigationSettingsItem(
+            icon = Icons.Default.Tune,
+            title = stringResource(R.string.audio_hdr_compat_mode_title),
+            subtitle = hdrPlaybackCompatibilityModeName,
+            onClick = onShowHdrPlaybackCompatibilityModeDialog,
+            onFocused = onItemFocused,
+            enabled = enabled
+        )
+    }
+
     item(key = "audio_mpv_hardware_decode_mode") {
         val hwDecodeModeName = when (playerSettings.mpvHardwareDecodeMode) {
             MpvHardwareDecodeMode.LEGACY_DIRECT_COPY -> stringResource(R.string.audio_mpv_hwdec_legacy_direct_copy)
@@ -262,18 +283,22 @@ internal fun AudioSettingsDialogs(
     showAudioLanguageDialog: Boolean,
     showSecondaryAudioLanguageDialog: Boolean,
     showDecoderPriorityDialog: Boolean,
+    showHdrPlaybackCompatibilityModeDialog: Boolean,
     showMpvHardwareDecodeModeDialog: Boolean,
     selectedLanguage: String,
     selectedSecondaryLanguage: String?,
     selectedPriority: Int,
+    selectedHdrPlaybackCompatibilityMode: HdrPlaybackCompatibilityMode,
     selectedMpvHardwareDecodeMode: MpvHardwareDecodeMode,
     onSetPreferredAudioLanguage: (String) -> Unit,
     onSetSecondaryPreferredAudioLanguage: (String?) -> Unit,
     onSetDecoderPriority: (Int) -> Unit,
+    onSetHdrPlaybackCompatibilityMode: (HdrPlaybackCompatibilityMode) -> Unit,
     onSetMpvHardwareDecodeMode: (MpvHardwareDecodeMode) -> Unit,
     onDismissAudioLanguageDialog: () -> Unit,
     onDismissSecondaryAudioLanguageDialog: () -> Unit,
     onDismissDecoderPriorityDialog: () -> Unit,
+    onDismissHdrPlaybackCompatibilityModeDialog: () -> Unit,
     onDismissMpvHardwareDecodeModeDialog: () -> Unit
 ) {
     if (showAudioLanguageDialog) {
@@ -311,6 +336,17 @@ internal fun AudioSettingsDialogs(
         )
     }
 
+    if (showHdrPlaybackCompatibilityModeDialog) {
+        HdrPlaybackCompatibilityModeDialog(
+            selectedMode = selectedHdrPlaybackCompatibilityMode,
+            onModeSelected = {
+                onSetHdrPlaybackCompatibilityMode(it)
+                onDismissHdrPlaybackCompatibilityModeDialog()
+            },
+            onDismiss = onDismissHdrPlaybackCompatibilityModeDialog
+        )
+    }
+
     if (showMpvHardwareDecodeModeDialog) {
         MpvHardwareDecodeModeDialog(
             selectedMode = selectedMpvHardwareDecodeMode,
@@ -320,6 +356,99 @@ internal fun AudioSettingsDialogs(
             },
             onDismiss = onDismissMpvHardwareDecodeModeDialog
         )
+    }
+}
+
+@Composable
+private fun HdrPlaybackCompatibilityModeDialog(
+    selectedMode: HdrPlaybackCompatibilityMode,
+    onModeSelected: (HdrPlaybackCompatibilityMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    val options = listOf(
+        Triple(
+            HdrPlaybackCompatibilityMode.OFF,
+            stringResource(R.string.audio_hdr_compat_mode_off),
+            stringResource(R.string.audio_hdr_compat_mode_off_desc)
+        ),
+        Triple(
+            HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
+            stringResource(R.string.audio_hdr_compat_mode_tone_map),
+            stringResource(R.string.audio_hdr_compat_mode_tone_map_desc)
+        ),
+        Triple(
+            HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR,
+            stringResource(R.string.audio_hdr_compat_mode_force_sdr),
+            stringResource(R.string.audio_hdr_compat_mode_force_sdr_desc)
+        )
+    )
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    NuvioDialog(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.audio_hdr_compat_mode_title),
+        width = 460.dp,
+        suppressFirstKeyUp = false
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 300.dp)
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)
+            ) {
+                items(count = options.size, key = { index -> options[index].first.name }) { index ->
+                    val (mode, title, subtitle) = options[index]
+                    val isSelected = mode == selectedMode
+
+                    Card(
+                        onClick = { onModeSelected(mode) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                        colors = CardDefaults.colors(
+                            containerColor = if (isSelected) NuvioColors.FocusBackground else NuvioColors.BackgroundCard,
+                            focusedContainerColor = NuvioColors.FocusBackground
+                        ),
+                        shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
+                        scale = CardDefaults.scale(focusedScale = 1f)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) NuvioColors.Primary else NuvioColors.TextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = stringResource(R.string.cd_selected),
+                                        tint = NuvioColors.Primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = subtitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NuvioColors.TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

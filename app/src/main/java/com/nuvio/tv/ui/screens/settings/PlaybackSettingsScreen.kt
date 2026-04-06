@@ -145,6 +145,7 @@ fun PlaybackSettingsContent(
     var showAudioLanguageDialog by remember { mutableStateOf(false) }
     var showSecondaryAudioLanguageDialog by remember { mutableStateOf(false) }
     var showDecoderPriorityDialog by remember { mutableStateOf(false) }
+    var showHdrPlaybackCompatibilityModeDialog by remember { mutableStateOf(false) }
     var showMpvHardwareDecodeModeDialog by remember { mutableStateOf(false) }
     var showStreamAutoPlayModeDialog by remember { mutableStateOf(false) }
     var showStreamAutoPlaySourceDialog by remember { mutableStateOf(false) }
@@ -166,6 +167,7 @@ fun PlaybackSettingsContent(
         showAudioLanguageDialog = false
         showSecondaryAudioLanguageDialog = false
         showDecoderPriorityDialog = false
+        showHdrPlaybackCompatibilityModeDialog = false
         showMpvHardwareDecodeModeDialog = false
         showStreamAutoPlayModeDialog = false
         showStreamAutoPlaySourceDialog = false
@@ -206,6 +208,7 @@ fun PlaybackSettingsContent(
                 onShowAudioLanguageDialog = { openDialog { showAudioLanguageDialog = true } },
                 onShowSecondaryAudioLanguageDialog = { openDialog { showSecondaryAudioLanguageDialog = true } },
                 onShowDecoderPriorityDialog = { openDialog { showDecoderPriorityDialog = true } },
+                onShowHdrPlaybackCompatibilityModeDialog = { openDialog { showHdrPlaybackCompatibilityModeDialog = true } },
                 onShowMpvHardwareDecodeModeDialog = { openDialog { showMpvHardwareDecodeModeDialog = true } },
                 onShowLanguageDialog = { openDialog { showLanguageDialog = true } },
                 onShowSecondaryLanguageDialog = { openDialog { showSecondaryLanguageDialog = true } },
@@ -280,6 +283,7 @@ fun PlaybackSettingsContent(
         showAudioLanguageDialog = showAudioLanguageDialog,
         showSecondaryAudioLanguageDialog = showSecondaryAudioLanguageDialog,
         showDecoderPriorityDialog = showDecoderPriorityDialog,
+        showHdrPlaybackCompatibilityModeDialog = showHdrPlaybackCompatibilityModeDialog,
         showMpvHardwareDecodeModeDialog = showMpvHardwareDecodeModeDialog,
         showStreamAutoPlayModeDialog = showStreamAutoPlayModeDialog,
         showStreamAutoPlaySourceDialog = showStreamAutoPlaySourceDialog,
@@ -323,6 +327,9 @@ fun PlaybackSettingsContent(
         onSetDecoderPriority = { priority ->
             coroutineScope.launch { viewModel.setDecoderPriority(priority) }
         },
+        onSetHdrPlaybackCompatibilityMode = { mode ->
+            coroutineScope.launch { viewModel.setHdrPlaybackCompatibilityMode(mode) }
+        },
         onSetMpvHardwareDecodeMode = { mode ->
             coroutineScope.launch { viewModel.setMpvHardwareDecodeMode(mode) }
         },
@@ -356,6 +363,7 @@ fun PlaybackSettingsContent(
         onDismissAudioLanguageDialog = ::dismissAllDialogs,
         onDismissSecondaryAudioLanguageDialog = ::dismissAllDialogs,
         onDismissDecoderPriorityDialog = ::dismissAllDialogs,
+        onDismissHdrPlaybackCompatibilityModeDialog = ::dismissAllDialogs,
         onDismissMpvHardwareDecodeModeDialog = ::dismissAllDialogs,
         onDismissStreamAutoPlayModeDialog = ::dismissAllDialogs,
         onDismissStreamAutoPlaySourceDialog = ::dismissAllDialogs,

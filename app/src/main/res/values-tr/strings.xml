@@ -371,6 +371,15 @@
     <string name="audio_tunneled">Tünelli Oynatma</string>
     <string name="audio_tunneled_sub">Donanım seviyesinde ses/video senkronizasyonu. Bazı Android TV cihazlarında performansı artırabilir</string>
     <string name="audio_dv_sub">DV donanım desteği olmayan cihazlar için Dolby Vision Profil 7\'yi standart HEVC\'ye dönüştür</string>
+    <string name="audio_hdr_compat_mode_title">HDR Oynatma Uyumluluğu</string>
+    <string name="audio_hdr_compat_mode_off">Kapalı</string>
+    <string name="audio_hdr_compat_mode_off_desc">Normal HDR veya Dolby Vision oynatmayı kullanır.</string>
+    <string name="audio_hdr_compat_mode_tone_map">HDR - SDR Ton Eşleme</string>
+    <string name="audio_hdr_compat_mode_tone_map_desc">Oynatma sırasında HDR videoyu SDR\'ye dönüştürür. Cihazınızda HDR veya Dolby Vision renkleri bozuksa bunu deneyin.</string>
+    <string name="audio_hdr_compat_mode_force_sdr">Deneysel: HDR\'yi SDR Gibi Yorumla</string>
+    <string name="audio_hdr_compat_mode_force_sdr_desc">HDR bilgisini yok sayıp videoyu SDR gibi oynatır. Yalnızca diğer seçenekler işe yaramazsa deneyin.</string>
+    <string name="audio_hdr_to_sdr_sub">Oynatma sırasında HDR videoyu SDR\'ye dönüştürür. Cihazınızda HDR veya Dolby Vision renkleri bozuksa bunu deneyin.</string>
+    <string name="audio_force_hdr_as_sdr_sub">HDR bilgisini yok sayıp videoyu SDR gibi oynatır. Yalnızca diğer seçenekler işe yaramazsa deneyin.</string>
     <string name="audio_mpv_hwdec_title">Donanım Kod Çözme (yalnızca MPV)</string>
     <string name="audio_mpv_hwdec_dialog_subtitle">libmpv\'nin donanım kod çözücülerini nasıl kullanacağını seçin.</string>
     <string name="audio_mpv_hwdec_legacy_direct_copy">Eski mod (direct -&gt; copy)</string>
@@ -1242,6 +1251,8 @@
     <!-- PlaybackAudioSettings -->
     <string name="audio_passthrough_info">Yüksek kaliteli ses geçidi (TrueHD, DTS, AC-3) desteklenen HDMI veya uyumlu ses alıcı / arayüz bar donanımlarına bağlanıldığında yazılımın çözümüne bırakılmadan direkt doğrudan iletilir.</string>
     <string name="audio_dv_title">DV7 - HEVC Geri Yansıması</string>
+    <string name="audio_hdr_to_sdr_title">HDR - SDR Ton Eşleme</string>
+    <string name="audio_force_hdr_as_sdr_title">Deneysel: HDR\'yi SDR Gibi Yorumla</string>
 
     <!-- SidebarNavigation / MainActivity -->
     <string name="nav_home">Ana Menü</string>

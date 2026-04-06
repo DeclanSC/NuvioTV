@@ -129,6 +129,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setMapDV7ToHevc(enabled)
     }
 
+    suspend fun setHdrPlaybackCompatibilityMode(mode: com.nuvio.tv.data.local.HdrPlaybackCompatibilityMode) {
+        playerSettingsDataStore.setHdrPlaybackCompatibilityMode(mode)
+    }
+
     suspend fun setMpvHardwareDecodeMode(mode: MpvHardwareDecodeMode) {
         playerSettingsDataStore.setMpvHardwareDecodeMode(mode)
     }

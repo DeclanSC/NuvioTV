@@ -375,6 +375,15 @@
     <string name="audio_tunneled">Tunneled Playback</string>
     <string name="audio_tunneled_sub">Hardware-level audio/video sync. May improve playback on some Android TV devices</string>
     <string name="audio_dv_sub">Map Dolby Vision Profile 7 to standard HEVC for devices without DV hardware support</string>
+    <string name="audio_hdr_compat_mode_title">HDR Playback Compatibility</string>
+    <string name="audio_hdr_compat_mode_off">Off</string>
+    <string name="audio_hdr_compat_mode_off_desc">Use normal HDR or Dolby Vision playback.</string>
+    <string name="audio_hdr_compat_mode_tone_map">HDR - SDR Tone Mapping</string>
+    <string name="audio_hdr_compat_mode_tone_map_desc">Converts HDR video to SDR during playback. Try this if HDR or Dolby Vision colors look wrong on your device.</string>
+    <string name="audio_hdr_compat_mode_force_sdr">Experimental: Force Interpret HDR as SDR</string>
+    <string name="audio_hdr_compat_mode_force_sdr_desc">Ignores HDR metadata and plays the video as SDR. Use only if the other options do not help.</string>
+    <string name="audio_hdr_to_sdr_sub">Converts HDR video to SDR during playback. Try this if HDR or Dolby Vision colors look wrong on your device.</string>
+    <string name="audio_force_hdr_as_sdr_sub">Ignores HDR metadata and plays the video as SDR. Use only if the other options do not help.</string>
     <string name="audio_mpv_hwdec_title">Hardware Decoding (MPV-only)</string>
     <string name="audio_mpv_hwdec_dialog_subtitle">Select how libmpv should use hardware decoders.</string>
     <string name="audio_mpv_hwdec_legacy_direct_copy">Legacy (direct -&gt; copy)</string>
@@ -1245,6 +1254,8 @@
     <!-- PlaybackAudioSettings -->
     <string name="audio_passthrough_info">Audio passthrough (TrueHD, DTS, AC-3, etc.) is automatic. When connected to a compatible AV receiver or soundbar via HDMI, lossless audio is sent as-is without decoding.</string>
     <string name="audio_dv_title">DV7 - HEVC Fallback</string>
+    <string name="audio_hdr_to_sdr_title">HDR - SDR Tone Mapping</string>
+    <string name="audio_force_hdr_as_sdr_title">Experimental: Force Interpret HDR as SDR</string>
 
     <!-- SidebarNavigation / MainActivity -->
     <string name="nav_home">Home</string>

@@ -2,12 +2,16 @@ package com.nuvio.tv.ui.screens.player
 
 import android.content.Context
 import android.content.res.Resources
+import android.media.MediaFormat
 import android.os.Build
+import android.os.Handler
 import android.util.Log
 import com.nuvio.tv.R
 import android.view.accessibility.CaptioningManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ColorInfo
+import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -20,12 +24,15 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.ForwardingRenderer
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
@@ -34,6 +41,7 @@ import com.nuvio.tv.data.local.AddonSubtitleStartupMode
 import com.nuvio.tv.data.local.AudioLanguageOption
 import com.nuvio.tv.data.local.SUBTITLE_LANGUAGE_FORCED
 import com.nuvio.tv.data.local.FrameRateMatchingMode
+import com.nuvio.tv.data.local.HdrPlaybackCompatibilityMode
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.domain.model.Subtitle
@@ -223,7 +231,12 @@ internal fun PlayerRuntimeController.initializePlayer(
                 },
                 gainAudioProcessor = gainAudioProcessor,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
-                onPlaybackSpeedAwareAudioOutputProviderCreated = { playbackSpeedAwareAudioOutputProvider = it }
+                onPlaybackSpeedAwareAudioOutputProviderCreated = { playbackSpeedAwareAudioOutputProvider = it },
+                mapDV7ToHevc = playerSettings.mapDV7ToHevc,
+                requestSdrToneMapping =
+                    playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
+                forceInterpretHdrAsSdr =
+                    playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
             ).setExtensionRendererMode(playerSettings.decoderPriority)
                 .setMapDV7ToHevc(playerSettings.mapDV7ToHevc)
 
@@ -695,8 +708,90 @@ private class SubtitleOffsetRenderersFactory(
     private val shouldNormalizeCuePositionProvider: () -> Boolean,
     private val gainAudioProcessor: GainAudioProcessor,
     private val playbackSpeedProvider: () -> Float,
-    private val onPlaybackSpeedAwareAudioOutputProviderCreated: (PlaybackSpeedAwareAudioOutputProvider) -> Unit
+    private val onPlaybackSpeedAwareAudioOutputProviderCreated: (PlaybackSpeedAwareAudioOutputProvider) -> Unit,
+    private val mapDV7ToHevc: Boolean,
+    private val requestSdrToneMapping: Boolean,
+    private val forceInterpretHdrAsSdr: Boolean
 ) : DefaultRenderersFactory(context) {
+
+    override fun buildVideoRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        eventHandler: Handler,
+        eventListener: VideoRendererEventListener,
+        allowedVideoJoiningTimeMs: Long,
+        out: ArrayList<Renderer>
+    ) {
+        if (!requestSdrToneMapping && !forceInterpretHdrAsSdr) {
+            super.buildVideoRenderers(
+                context,
+                extensionRendererMode,
+                mediaCodecSelector,
+                enableDecoderFallback,
+                eventHandler,
+                eventListener,
+                allowedVideoJoiningTimeMs,
+                out
+            )
+            return
+        }
+
+        val videoRendererBuilder = MediaCodecVideoRenderer.Builder(context)
+            .setCodecAdapterFactory(getCodecAdapterFactory())
+            .setMediaCodecSelector(mediaCodecSelector)
+            .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
+            .setEnableDecoderFallback(enableDecoderFallback)
+            .setEventHandler(eventHandler)
+            .setEventListener(eventListener)
+            .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
+            .setMapDV7ToHevc(mapDV7ToHevc)
+
+        out.add(
+            NuvioMediaCodecVideoRenderer(
+                builder = videoRendererBuilder,
+                requestSdrToneMapping = requestSdrToneMapping,
+                forceInterpretHdrAsSdr = forceInterpretHdrAsSdr
+            )
+        )
+
+        if (extensionRendererMode == EXTENSION_RENDERER_MODE_OFF) {
+            return
+        }
+
+        var extensionRendererIndex = out.size
+        if (extensionRendererMode == EXTENSION_RENDERER_MODE_PREFER) {
+            extensionRendererIndex--
+        }
+
+        extensionRendererIndex =
+            addOptionalVideoRenderer(
+                out = out,
+                extensionRendererIndex = extensionRendererIndex,
+                className = "androidx.media3.decoder.vp9.LibvpxVideoRenderer",
+                allowedVideoJoiningTimeMs = allowedVideoJoiningTimeMs,
+                eventHandler = eventHandler,
+                eventListener = eventListener
+            )
+        extensionRendererIndex =
+            addOptionalVideoRenderer(
+                out = out,
+                extensionRendererIndex = extensionRendererIndex,
+                className = "androidx.media3.decoder.av1.Libdav1dVideoRenderer",
+                allowedVideoJoiningTimeMs = allowedVideoJoiningTimeMs,
+                eventHandler = eventHandler,
+                eventListener = eventListener
+            )
+        addOptionalVideoRenderer(
+            out = out,
+            extensionRendererIndex = extensionRendererIndex,
+            className = "androidx.media3.decoder.ffmpeg.ExperimentalFfmpegVideoRenderer",
+            allowedVideoJoiningTimeMs = allowedVideoJoiningTimeMs,
+            eventHandler = eventHandler,
+            eventListener = eventListener
+        )
+    }
 
     override fun buildAudioSink(
         context: Context,
@@ -735,6 +830,80 @@ private class SubtitleOffsetRenderersFactory(
         for (index in startIndex until out.size) {
             out[index] = SubtitleOffsetRenderer(out[index], subtitleDelayUsProvider)
         }
+    }
+}
+
+private fun addOptionalVideoRenderer(
+    out: ArrayList<Renderer>,
+    extensionRendererIndex: Int,
+    className: String,
+    allowedVideoJoiningTimeMs: Long,
+    eventHandler: Handler,
+    eventListener: VideoRendererEventListener
+): Int {
+    return try {
+        val clazz = Class.forName(className)
+        val constructor = clazz.getConstructor(
+            Long::class.javaPrimitiveType,
+            Handler::class.java,
+            VideoRendererEventListener::class.java,
+            Int::class.javaPrimitiveType
+        )
+        val renderer = constructor.newInstance(
+            allowedVideoJoiningTimeMs,
+            eventHandler,
+            eventListener,
+            DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY
+        ) as Renderer
+        out.add(extensionRendererIndex, renderer)
+        extensionRendererIndex + 1
+    } catch (_: ClassNotFoundException) {
+        extensionRendererIndex
+    }
+}
+
+private class NuvioMediaCodecVideoRenderer(
+    builder: MediaCodecVideoRenderer.Builder,
+    private val requestSdrToneMapping: Boolean,
+    private val forceInterpretHdrAsSdr: Boolean
+) : MediaCodecVideoRenderer(builder) {
+
+    override fun getMediaFormat(
+        format: Format,
+        codecMimeType: String,
+        codecMaxValues: CodecMaxValues,
+        codecOperatingRate: Float,
+        deviceNeedsNoPostProcessWorkaround: Boolean,
+        tunnelingAudioSessionId: Int
+    ): MediaFormat {
+        val decoderFormat =
+            if (
+                forceInterpretHdrAsSdr &&
+                (ColorInfo.isTransferHdr(format.colorInfo) || format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION)
+            ) {
+                format.buildUpon().setColorInfo(ColorInfo.SDR_BT709_LIMITED).build()
+            } else {
+                format
+            }
+        val mediaFormat = super.getMediaFormat(
+            decoderFormat,
+            codecMimeType,
+            codecMaxValues,
+            codecOperatingRate,
+            deviceNeedsNoPostProcessWorkaround,
+            tunnelingAudioSessionId
+        )
+        if (
+            requestSdrToneMapping &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            (ColorInfo.isTransferHdr(format.colorInfo) || format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION)
+        ) {
+            mediaFormat.setInteger(
+                MediaFormat.KEY_COLOR_TRANSFER_REQUEST,
+                MediaFormat.COLOR_TRANSFER_SDR_VIDEO
+            )
+        }
+        return mediaFormat
     }
 }
 
