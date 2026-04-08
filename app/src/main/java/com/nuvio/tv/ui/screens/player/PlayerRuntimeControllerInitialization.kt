@@ -24,7 +24,9 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.ForwardingRenderer
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
@@ -233,6 +235,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 onPlaybackSpeedAwareAudioOutputProviderCreated = { playbackSpeedAwareAudioOutputProvider = it },
                 mapDV7ToHevc = playerSettings.mapDV7ToHevc,
+                disableDolbyVision = playerSettings.disableDolbyVision,
                 requestSdrToneMapping =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
                 forceInterpretHdrAsSdr =
@@ -710,6 +713,7 @@ private class SubtitleOffsetRenderersFactory(
     private val playbackSpeedProvider: () -> Float,
     private val onPlaybackSpeedAwareAudioOutputProviderCreated: (PlaybackSpeedAwareAudioOutputProvider) -> Unit,
     private val mapDV7ToHevc: Boolean,
+    private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : DefaultRenderersFactory(context) {
@@ -724,7 +728,7 @@ private class SubtitleOffsetRenderersFactory(
         allowedVideoJoiningTimeMs: Long,
         out: ArrayList<Renderer>
     ) {
-        if (!requestSdrToneMapping && !forceInterpretHdrAsSdr) {
+        if (!disableDolbyVision && !requestSdrToneMapping && !forceInterpretHdrAsSdr) {
             super.buildVideoRenderers(
                 context,
                 extensionRendererMode,
@@ -750,7 +754,10 @@ private class SubtitleOffsetRenderersFactory(
 
         out.add(
             NuvioMediaCodecVideoRenderer(
+                context = context,
                 builder = videoRendererBuilder,
+                mapDV7ToHevc = mapDV7ToHevc,
+                disableDolbyVision = disableDolbyVision,
                 requestSdrToneMapping = requestSdrToneMapping,
                 forceInterpretHdrAsSdr = forceInterpretHdrAsSdr
             )
@@ -863,10 +870,124 @@ private fun addOptionalVideoRenderer(
 }
 
 private class NuvioMediaCodecVideoRenderer(
+    context: Context,
     builder: MediaCodecVideoRenderer.Builder,
+    private val mapDV7ToHevc: Boolean,
+    private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : MediaCodecVideoRenderer(builder) {
+
+    private val appContext = context.applicationContext
+    private var rendererTunnelingEnabled = false
+
+    override fun supportsFormat(mediaCodecSelector: MediaCodecSelector, format: Format): Int {
+        if (!shouldForceDolbyVisionFallback(format)) {
+            return super.supportsFormat(mediaCodecSelector, format)
+        }
+
+        val requiresSecureDecryption = format.drmInitData != null
+        var decoderInfos =
+            getAlternativeDecoderInfos(
+                mediaCodecSelector = mediaCodecSelector,
+                format = format,
+                requiresSecureDecoder = requiresSecureDecryption,
+                requiresTunnelingDecoder = false
+            )
+        if (requiresSecureDecryption && decoderInfos.isEmpty()) {
+            decoderInfos =
+                getAlternativeDecoderInfos(
+                    mediaCodecSelector = mediaCodecSelector,
+                    format = format,
+                    requiresSecureDecoder = false,
+                    requiresTunnelingDecoder = false
+                )
+        }
+        if (decoderInfos.isEmpty()) {
+            return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_SUBTYPE)
+        }
+        if (!supportsFormatDrm(format)) {
+            return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_DRM)
+        }
+
+        var decoderInfo = decoderInfos.first()
+        var isFormatSupported = decoderInfo.isFormatSupported(appContext, format)
+        if (!isFormatSupported) {
+            for (index in 1 until decoderInfos.size) {
+                val otherDecoderInfo = decoderInfos[index]
+                if (otherDecoderInfo.isFormatSupported(appContext, format)) {
+                    decoderInfo = otherDecoderInfo
+                    isFormatSupported = true
+                    break
+                }
+            }
+        }
+
+        val formatSupport = if (isFormatSupported) C.FORMAT_HANDLED else C.FORMAT_EXCEEDS_CAPABILITIES
+        val adaptiveSupport =
+            if (decoderInfo.isSeamlessAdaptationSupported(format)) {
+                RendererCapabilities.ADAPTIVE_SEAMLESS
+            } else {
+                RendererCapabilities.ADAPTIVE_NOT_SEAMLESS
+            }
+        val hardwareAccelerationSupport =
+            if (decoderInfo.hardwareAccelerated) {
+                RendererCapabilities.HARDWARE_ACCELERATION_SUPPORTED
+            } else {
+                RendererCapabilities.HARDWARE_ACCELERATION_NOT_SUPPORTED
+            }
+        val tunnelingSupport =
+            if (isFormatSupported &&
+                getAlternativeDecoderInfos(
+                    mediaCodecSelector = mediaCodecSelector,
+                    format = format,
+                    requiresSecureDecoder = requiresSecureDecryption,
+                    requiresTunnelingDecoder = true
+                ).firstOrNull()?.let { tunnelingDecoderInfo ->
+                    tunnelingDecoderInfo.isFormatSupported(appContext, format) &&
+                        tunnelingDecoderInfo.isSeamlessAdaptationSupported(format)
+                } == true
+            ) {
+                RendererCapabilities.TUNNELING_SUPPORTED
+            } else {
+                RendererCapabilities.TUNNELING_NOT_SUPPORTED
+            }
+
+        return RendererCapabilities.create(
+            formatSupport,
+            adaptiveSupport,
+            tunnelingSupport,
+            hardwareAccelerationSupport,
+            RendererCapabilities.DECODER_SUPPORT_FALLBACK_MIMETYPE
+        )
+    }
+
+    override fun getDecoderInfos(
+        mediaCodecSelector: MediaCodecSelector,
+        format: Format,
+        requiresSecureDecoder: Boolean
+    ): List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> {
+        if (!shouldForceDolbyVisionFallback(format)) {
+            return super.getDecoderInfos(mediaCodecSelector, format, requiresSecureDecoder)
+        }
+
+        return getAlternativeDecoderInfos(
+            mediaCodecSelector = mediaCodecSelector,
+            format = format,
+            requiresSecureDecoder = requiresSecureDecoder,
+            requiresTunnelingDecoder = rendererTunnelingEnabled
+        )
+    }
+
+    override fun onEnabled(joining: Boolean, mayRenderStartOfStream: Boolean) {
+        rendererTunnelingEnabled = getConfiguration().tunneling
+        super.onEnabled(joining, mayRenderStartOfStream)
+    }
+
+    override fun onDisabled() {
+        rendererTunnelingEnabled = false
+        super.onDisabled()
+    }
 
     override fun getMediaFormat(
         format: Format,
@@ -904,6 +1025,34 @@ private class NuvioMediaCodecVideoRenderer(
             )
         }
         return mediaFormat
+    }
+
+    private fun shouldForceDolbyVisionFallback(format: Format): Boolean {
+        return disableDolbyVision && format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
+    }
+
+    private fun getAlternativeDecoderInfos(
+        mediaCodecSelector: MediaCodecSelector,
+        format: Format,
+        requiresSecureDecoder: Boolean,
+        requiresTunnelingDecoder: Boolean
+    ): List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> {
+        if (!shouldForceDolbyVisionFallback(format)) {
+            return emptyList()
+        }
+
+        val alternativeDecoderInfos = MediaCodecUtil.getAlternativeDecoderInfos(
+            mediaCodecSelector,
+            format,
+            requiresSecureDecoder,
+            requiresTunnelingDecoder,
+            mapDV7ToHevc
+        )
+        return MediaCodecUtil.getDecoderInfosSortedByFormatSupport(
+            appContext,
+            alternativeDecoderInfos,
+            format
+        )
     }
 }
 

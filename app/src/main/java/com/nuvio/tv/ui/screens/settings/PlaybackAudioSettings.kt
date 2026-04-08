@@ -72,6 +72,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetSkipSilence: (Boolean) -> Unit,
     onSetTunnelingEnabled: (Boolean) -> Unit,
     onSetMapDV7ToHevc: (Boolean) -> Unit,
+    onSetDisableDolbyVision: (Boolean) -> Unit,
     onItemFocused: () -> Unit = {},
     enabled: Boolean = true
 ) {
@@ -234,6 +235,18 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
             subtitle = stringResource(R.string.audio_dv_sub),
             isChecked = playerSettings.mapDV7ToHevc,
             onCheckedChange = onSetMapDV7ToHevc,
+            onFocused = onItemFocused,
+            enabled = enabled
+        )
+    }
+
+    item(key = "audio_disable_dolby_vision") {
+        ToggleSettingsItem(
+            icon = Icons.Default.Tune,
+            title = stringResource(R.string.audio_disable_dolby_vision_title),
+            subtitle = stringResource(R.string.audio_disable_dolby_vision_sub),
+            isChecked = playerSettings.disableDolbyVision,
+            onCheckedChange = onSetDisableDolbyVision,
             onFocused = onItemFocused,
             enabled = enabled
         )

@@ -1251,6 +1251,8 @@
     <!-- PlaybackAudioSettings -->
     <string name="audio_passthrough_info">Yüksek kaliteli ses geçidi (TrueHD, DTS, AC-3) desteklenen HDMI veya uyumlu ses alıcı / arayüz bar donanımlarına bağlanıldığında yazılımın çözümüne bırakılmadan direkt doğrudan iletilir.</string>
     <string name="audio_dv_title">DV7 - HEVC Geri Yansıması</string>
+    <string name="audio_disable_dolby_vision_title">Dolby Vision\'i devre dışı bırak</string>
+    <string name="audio_disable_dolby_vision_sub">Tüm Dolby Vision profillerini engeller ve mümkün olduğunda HEVC, AVC veya AV1\'e geri döner.</string>
     <string name="audio_hdr_to_sdr_title">HDR - SDR Ton Eşleme</string>
     <string name="audio_force_hdr_as_sdr_title">Deneysel: HDR\'yi SDR Gibi Yorumla</string>
 

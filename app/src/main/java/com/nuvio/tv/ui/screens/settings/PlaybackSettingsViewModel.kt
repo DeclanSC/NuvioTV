@@ -129,6 +129,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setMapDV7ToHevc(enabled)
     }
 
+    suspend fun setDisableDolbyVision(enabled: Boolean) {
+        playerSettingsDataStore.setDisableDolbyVision(enabled)
+    }
+
     suspend fun setHdrPlaybackCompatibilityMode(mode: com.nuvio.tv.data.local.HdrPlaybackCompatibilityMode) {
         playerSettingsDataStore.setHdrPlaybackCompatibilityMode(mode)
     }

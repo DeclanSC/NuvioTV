@@ -176,8 +176,9 @@ data class PlayerSettings(
     val pauseOverlayEnabled: Boolean = true,
     val osdClockEnabled: Boolean = true,
     val skipIntroEnabled: Boolean = true,
-    // Dolby Vision Profile 7 → HEVC fallback (requires forked ExoPlayer)
+    // Dolby Vision Profile 7 -> HEVC fallback (requires forked ExoPlayer)
     val mapDV7ToHevc: Boolean = false,
+    val disableDolbyVision: Boolean = false,
     val hdrPlaybackCompatibilityMode: HdrPlaybackCompatibilityMode = HdrPlaybackCompatibilityMode.OFF,
     val mpvHardwareDecodeMode: MpvHardwareDecodeMode = MpvHardwareDecodeMode.AUTO_SAFE,
     // Display settings
@@ -314,6 +315,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val osdClockEnabledKey = booleanPreferencesKey("osd_clock_enabled")
     private val skipIntroEnabledKey = booleanPreferencesKey("skip_intro_enabled")
     private val mapDV7ToHevcKey = booleanPreferencesKey("map_dv7_to_hevc")
+    private val disableDolbyVisionKey = booleanPreferencesKey("disable_dolby_vision")
     private val requestSdrToneMappingKey = booleanPreferencesKey("request_sdr_tone_mapping")
     private val forceInterpretHdrAsSdrKey = booleanPreferencesKey("force_interpret_hdr_as_sdr")
     private val hdrPlaybackCompatibilityModeKey = stringPreferencesKey("hdr_playback_compatibility_mode")
@@ -467,6 +469,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 osdClockEnabled = prefs[osdClockEnabledKey] ?: true,
                 skipIntroEnabled = prefs[skipIntroEnabledKey] ?: true,
                 mapDV7ToHevc = prefs[mapDV7ToHevcKey] ?: false,
+                disableDolbyVision = prefs[disableDolbyVisionKey] ?: false,
                 hdrPlaybackCompatibilityMode = parseHdrPlaybackCompatibilityMode(
                     prefs[hdrPlaybackCompatibilityModeKey],
                     prefs[requestSdrToneMappingKey] ?: false,
@@ -873,6 +876,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setMapDV7ToHevc(enabled: Boolean) {
         store().edit { prefs ->
             prefs[mapDV7ToHevcKey] = enabled
+        }
+    }
+
+    suspend fun setDisableDolbyVision(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[disableDolbyVisionKey] = enabled
         }
     }
 
