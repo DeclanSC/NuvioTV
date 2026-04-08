@@ -34,6 +34,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.PlaybackVideoGraphWrapper
+import androidx.media3.exoplayer.video.VideoFrameReleaseControl
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
@@ -278,6 +280,12 @@ internal fun PlayerRuntimeController.initializePlayer(
             libassPipelineSwitchInFlight = false
 
             _exoPlayer?.apply {
+                if (
+                    playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR ||
+                    playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
+                ) {
+                    setVideoEffects(emptyList())
+                }
                 
                 val audioAttributes = AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -989,6 +997,20 @@ private class NuvioMediaCodecVideoRenderer(
         super.onDisabled()
     }
 
+    override fun createPlaybackVideoGraphWrapper(
+        context: Context,
+        videoFrameReleaseControl: VideoFrameReleaseControl
+    ): PlaybackVideoGraphWrapper {
+        return super.createPlaybackVideoGraphWrapper(context, videoFrameReleaseControl).apply {
+            if (requestSdrToneMapping) {
+                setRequestOpenGlToneMapping(true)
+            }
+            if (forceInterpretHdrAsSdr) {
+                setIsInputSdrToneMapped(true)
+            }
+        }
+    }
+
     override fun getMediaFormat(
         format: Format,
         codecMimeType: String,
@@ -1014,16 +1036,6 @@ private class NuvioMediaCodecVideoRenderer(
             deviceNeedsNoPostProcessWorkaround,
             tunnelingAudioSessionId
         )
-        if (
-            requestSdrToneMapping &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            (ColorInfo.isTransferHdr(format.colorInfo) || format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION)
-        ) {
-            mediaFormat.setInteger(
-                MediaFormat.KEY_COLOR_TRANSFER_REQUEST,
-                MediaFormat.COLOR_TRANSFER_SDR_VIDEO
-            )
-        }
         return mediaFormat
     }
 
