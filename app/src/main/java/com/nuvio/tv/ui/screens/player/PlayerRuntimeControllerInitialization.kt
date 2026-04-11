@@ -111,10 +111,20 @@ internal fun PlayerRuntimeController.initializePlayer(
             }
             resetLoadingOverlayForNewStream()
             hasTriedAudioPcmFallback = false
+            hasTriedAv1SoftwareFallback = false
             hasTriedDv7HevcFallback = false
             mpvDelayStartAfterAfrSwitch = false
             val playerSettings = playerSettingsDataStore.playerSettings.first()
-            cachedDecoderPriority = playerSettings.decoderPriority
+            val effectiveDecoderPriority =
+                if (
+                    forceSoftwareAv1Playback &&
+                    playerSettings.decoderPriority == DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+                ) {
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                } else {
+                    playerSettings.decoderPriority
+                }
+            cachedDecoderPriority = effectiveDecoderPriority
             val preferredAudioLanguages = resolvePreferredAudioLanguages(
                 preferredAudioLanguage = playerSettings.preferredAudioLanguage,
                 secondaryPreferredAudioLanguage = playerSettings.secondaryPreferredAudioLanguage,
@@ -260,9 +270,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
                 convertHdr10PlusToHdr10 =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10,
+                forceSoftwareAv1Playback = forceSoftwareAv1Playback,
                 forceInterpretHdrAsSdr =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
-            ).setExtensionRendererMode(playerSettings.decoderPriority)
+            ).setExtensionRendererMode(effectiveDecoderPriority)
                 .setMapDV7ToHevc(playerSettings.mapDV7ToHevc || forceDv7ToHevc)
 
             if (showLoadingStatus) _uiState.update { it.copy(loadingMessage = context.getString(R.string.player_loading_building)) }
@@ -490,6 +501,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                         }
                         // Attempt automatic recovery for transient errors.
                         if (tryAudioTrackPcmFallback(error)) {
+                            return
+                        }
+                        if (tryAv1SoftwareDecoderFallback(error)) {
                             return
                         }
                         if (tryDv7HevcFallback(error)) {
@@ -778,6 +792,7 @@ private class SubtitleOffsetRenderersFactory(
     private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val convertHdr10PlusToHdr10: Boolean,
+    private val forceSoftwareAv1Playback: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : DefaultRenderersFactory(context) {
 
@@ -849,7 +864,13 @@ private class SubtitleOffsetRenderersFactory(
         allowedVideoJoiningTimeMs: Long,
         out: ArrayList<Renderer>
     ) {
-        if (!disableDolbyVision && !requestSdrToneMapping && !convertHdr10PlusToHdr10 && !forceInterpretHdrAsSdr) {
+        if (
+            !disableDolbyVision &&
+            !requestSdrToneMapping &&
+            !convertHdr10PlusToHdr10 &&
+            !forceSoftwareAv1Playback &&
+            !forceInterpretHdrAsSdr
+        ) {
             super.buildVideoRenderers(
                 context,
                 extensionRendererMode,
@@ -881,6 +902,7 @@ private class SubtitleOffsetRenderersFactory(
                 disableDolbyVision = disableDolbyVision,
                 requestSdrToneMapping = requestSdrToneMapping,
                 convertHdr10PlusToHdr10 = convertHdr10PlusToHdr10,
+                forceSoftwareAv1Playback = forceSoftwareAv1Playback,
                 forceInterpretHdrAsSdr = forceInterpretHdrAsSdr
             )
         )
@@ -1008,6 +1030,7 @@ private class NuvioMediaCodecVideoRenderer(
     private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val convertHdr10PlusToHdr10: Boolean,
+    private val forceSoftwareAv1Playback: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : MediaCodecVideoRenderer(builder) {
 
@@ -1015,6 +1038,9 @@ private class NuvioMediaCodecVideoRenderer(
     private var rendererTunnelingEnabled = false
 
     override fun supportsFormat(mediaCodecSelector: MediaCodecSelector, format: Format): Int {
+        if (shouldForceSoftwareAv1Playback(format)) {
+            return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_SUBTYPE)
+        }
         if (!shouldForceDolbyVisionFallback(format)) {
             return super.supportsFormat(mediaCodecSelector, format)
         }
@@ -1100,6 +1126,9 @@ private class NuvioMediaCodecVideoRenderer(
         format: Format,
         requiresSecureDecoder: Boolean
     ): List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> {
+        if (shouldForceSoftwareAv1Playback(format)) {
+            return emptyList()
+        }
         if (!shouldForceDolbyVisionFallback(format)) {
             return super.getDecoderInfos(mediaCodecSelector, format, requiresSecureDecoder)
         }
@@ -1173,6 +1202,13 @@ private class NuvioMediaCodecVideoRenderer(
 
     private fun shouldForceDolbyVisionFallback(format: Format): Boolean {
         return disableDolbyVision && format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
+    }
+
+    private fun shouldForceSoftwareAv1Playback(format: Format): Boolean {
+        return forceSoftwareAv1Playback &&
+            format.sampleMimeType == MimeTypes.VIDEO_AV1 &&
+            format.cryptoType == C.CRYPTO_TYPE_NONE &&
+            format.drmInitData == null
     }
 
     private fun getAlternativeDecoderInfos(
