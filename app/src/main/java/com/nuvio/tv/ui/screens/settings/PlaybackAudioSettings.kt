@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Speed
@@ -30,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +55,7 @@ import androidx.tv.material3.Text
 import com.nuvio.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
 import com.nuvio.tv.data.local.displayName
 import com.nuvio.tv.data.local.AudioLanguageOption
+import com.nuvio.tv.data.local.DolbyVisionProfile7Mode
 import com.nuvio.tv.data.local.HdrPlaybackCompatibilityMode
 import com.nuvio.tv.data.local.MpvHardwareDecodeMode
 import com.nuvio.tv.data.local.PlayerSettings
@@ -65,6 +69,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onShowAudioLanguageDialog: () -> Unit,
     onShowSecondaryAudioLanguageDialog: () -> Unit,
     onShowDecoderPriorityDialog: () -> Unit,
+    onShowDolbyVisionProfile7ModeDialog: () -> Unit,
     onShowHdrPlaybackCompatibilityModeDialog: () -> Unit,
     onShowMpvHardwareDecodeModeDialog: () -> Unit,
     onSetTrailerEnabled: (Boolean) -> Unit,
@@ -72,7 +77,6 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetSkipSilence: (Boolean) -> Unit,
     onSetTunnelingEnabled: (Boolean) -> Unit,
     onSetDolbyAudioCompatibilityMode: (Boolean) -> Unit,
-    onSetMapDV7ToHevc: (Boolean) -> Unit,
     onSetDisableDolbyVision: (Boolean) -> Unit,
     onItemFocused: () -> Unit = {},
     enabled: Boolean = true
@@ -218,18 +222,6 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
         )
     }
 
-    item(key = "audio_dolby_compatibility_mode") {
-        ToggleSettingsItem(
-            icon = Icons.Default.Tune,
-            title = stringResource(R.string.audio_dolby_compatibility_title),
-            subtitle = stringResource(R.string.audio_dolby_compatibility_sub),
-            isChecked = playerSettings.dolbyAudioCompatibilityMode,
-            onCheckedChange = onSetDolbyAudioCompatibilityMode,
-            onFocused = onItemFocused,
-            enabled = enabled
-        )
-    }
-
     item(key = "audio_tunneled_playback") {
         ToggleSettingsItem(
             icon = Icons.Default.VolumeUp,
@@ -242,28 +234,66 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
         )
     }
 
-    item(key = "audio_dv7_hevc_fallback") {
-        ToggleSettingsItem(
-            icon = Icons.Default.Tune,
-            title = stringResource(R.string.audio_dv_title),
-            subtitle = stringResource(R.string.audio_dv_sub),
-            isChecked = playerSettings.mapDV7ToHevc,
-            onCheckedChange = onSetMapDV7ToHevc,
-            onFocused = onItemFocused,
-            enabled = enabled
-        )
-    }
+    item(key = "audio_dolby_settings_header") {
+        var dolbySettingsExpanded by rememberSaveable { mutableStateOf(false) }
 
-    item(key = "audio_disable_dolby_vision") {
-        ToggleSettingsItem(
-            icon = Icons.Default.Tune,
-            title = stringResource(R.string.audio_disable_dolby_vision_title),
-            subtitle = stringResource(R.string.audio_disable_dolby_vision_sub),
-            isChecked = playerSettings.disableDolbyVision,
-            onCheckedChange = onSetDisableDolbyVision,
+        SettingsActionRow(
+            title = stringResource(R.string.audio_dolby_settings_title),
+            subtitle = stringResource(R.string.audio_dolby_settings_sub),
+            value = if (dolbySettingsExpanded) stringResource(R.string.playback_afr_open) else stringResource(R.string.playback_afr_closed),
+            onClick = { dolbySettingsExpanded = !dolbySettingsExpanded },
             onFocused = onItemFocused,
-            enabled = enabled
+            enabled = enabled,
+            trailingIcon = if (dolbySettingsExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight
         )
+
+        if (dolbySettingsExpanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+            ) {
+                ToggleSettingsItem(
+                    icon = Icons.Default.Tune,
+                    title = stringResource(R.string.audio_dolby_compatibility_title),
+                    subtitle = stringResource(R.string.audio_dolby_compatibility_sub),
+                    isChecked = playerSettings.dolbyAudioCompatibilityMode,
+                    onCheckedChange = onSetDolbyAudioCompatibilityMode,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val dolbyVisionProfile7ModeName = when {
+                    playerSettings.mapDV7ToHevc -> stringResource(R.string.audio_dv7_mode_map_to_hevc)
+                    playerSettings.disableDolbyVisionForDv7 || playerSettings.disableDolbyVision ->
+                        stringResource(R.string.audio_dv7_mode_disable)
+                    else -> stringResource(R.string.audio_dv7_mode_off)
+                }
+
+                NavigationSettingsItem(
+                    icon = Icons.Default.Tune,
+                    title = stringResource(R.string.audio_dv7_mode_title),
+                    subtitle = dolbyVisionProfile7ModeName,
+                    onClick = onShowDolbyVisionProfile7ModeDialog,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                ToggleSettingsItem(
+                    icon = Icons.Default.Tune,
+                    title = stringResource(R.string.audio_disable_dolby_vision_title),
+                    subtitle = stringResource(R.string.audio_disable_dolby_vision_sub),
+                    isChecked = playerSettings.disableDolbyVision,
+                    onCheckedChange = onSetDisableDolbyVision,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+            }
+        }
     }
 
     item(key = "audio_hdr_playback_compatibility_mode") {
@@ -312,21 +342,25 @@ internal fun AudioSettingsDialogs(
     showAudioLanguageDialog: Boolean,
     showSecondaryAudioLanguageDialog: Boolean,
     showDecoderPriorityDialog: Boolean,
+    showDolbyVisionProfile7ModeDialog: Boolean,
     showHdrPlaybackCompatibilityModeDialog: Boolean,
     showMpvHardwareDecodeModeDialog: Boolean,
     selectedLanguage: String,
     selectedSecondaryLanguage: String?,
     selectedPriority: Int,
+    selectedDolbyVisionProfile7Mode: DolbyVisionProfile7Mode,
     selectedHdrPlaybackCompatibilityMode: HdrPlaybackCompatibilityMode,
     selectedMpvHardwareDecodeMode: MpvHardwareDecodeMode,
     onSetPreferredAudioLanguage: (String) -> Unit,
     onSetSecondaryPreferredAudioLanguage: (String?) -> Unit,
     onSetDecoderPriority: (Int) -> Unit,
+    onSetDolbyVisionProfile7Mode: (DolbyVisionProfile7Mode) -> Unit,
     onSetHdrPlaybackCompatibilityMode: (HdrPlaybackCompatibilityMode) -> Unit,
     onSetMpvHardwareDecodeMode: (MpvHardwareDecodeMode) -> Unit,
     onDismissAudioLanguageDialog: () -> Unit,
     onDismissSecondaryAudioLanguageDialog: () -> Unit,
     onDismissDecoderPriorityDialog: () -> Unit,
+    onDismissDolbyVisionProfile7ModeDialog: () -> Unit,
     onDismissHdrPlaybackCompatibilityModeDialog: () -> Unit,
     onDismissMpvHardwareDecodeModeDialog: () -> Unit
 ) {
@@ -365,6 +399,17 @@ internal fun AudioSettingsDialogs(
         )
     }
 
+    if (showDolbyVisionProfile7ModeDialog) {
+        DolbyVisionProfile7ModeDialog(
+            selectedMode = selectedDolbyVisionProfile7Mode,
+            onModeSelected = {
+                onSetDolbyVisionProfile7Mode(it)
+                onDismissDolbyVisionProfile7ModeDialog()
+            },
+            onDismiss = onDismissDolbyVisionProfile7ModeDialog
+        )
+    }
+
     if (showHdrPlaybackCompatibilityModeDialog) {
         HdrPlaybackCompatibilityModeDialog(
             selectedMode = selectedHdrPlaybackCompatibilityMode,
@@ -385,6 +430,99 @@ internal fun AudioSettingsDialogs(
             },
             onDismiss = onDismissMpvHardwareDecodeModeDialog
         )
+    }
+}
+
+@Composable
+private fun DolbyVisionProfile7ModeDialog(
+    selectedMode: DolbyVisionProfile7Mode,
+    onModeSelected: (DolbyVisionProfile7Mode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    val options = listOf(
+        Triple(
+            DolbyVisionProfile7Mode.OFF,
+            stringResource(R.string.audio_dv7_mode_off),
+            stringResource(R.string.audio_dv7_mode_off_desc)
+        ),
+        Triple(
+            DolbyVisionProfile7Mode.MAP_TO_HEVC,
+            stringResource(R.string.audio_dv7_mode_map_to_hevc),
+            stringResource(R.string.audio_dv7_mode_map_to_hevc_desc)
+        ),
+        Triple(
+            DolbyVisionProfile7Mode.DISABLE_DV7,
+            stringResource(R.string.audio_dv7_mode_disable),
+            stringResource(R.string.audio_dv7_mode_disable_desc)
+        )
+    )
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    NuvioDialog(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.audio_dv7_mode_title),
+        width = 460.dp,
+        suppressFirstKeyUp = false
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 300.dp)
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)
+            ) {
+                items(count = options.size, key = { index -> options[index].first.name }) { index ->
+                    val (mode, title, subtitle) = options[index]
+                    val isSelected = mode == selectedMode
+
+                    Card(
+                        onClick = { onModeSelected(mode) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                        colors = CardDefaults.colors(
+                            containerColor = if (isSelected) NuvioColors.FocusBackground else NuvioColors.BackgroundCard,
+                            focusedContainerColor = NuvioColors.FocusBackground
+                        ),
+                        shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
+                        scale = CardDefaults.scale(focusedScale = 1f)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) NuvioColors.Primary else NuvioColors.TextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = stringResource(R.string.cd_selected),
+                                        tint = NuvioColors.Primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = subtitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NuvioColors.TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

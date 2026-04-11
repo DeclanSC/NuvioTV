@@ -63,6 +63,44 @@ import kotlinx.coroutines.withTimeoutOrNull
 private const val STARTUP_SUBTITLE_PREFETCH_TIMEOUT_MS = 10_000L
 private const val MPV_AFR_SETTLE_DELAY_MS = 2_000L
 
+internal fun isDolbyVisionVideo(format: Format): Boolean {
+    return format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
+}
+
+internal fun isHdrVideo(format: Format): Boolean {
+    return isDolbyVisionVideo(format) || ColorInfo.isTransferHdr(format.colorInfo)
+}
+
+internal fun isHdrCompatibilityModeEnabled(mode: HdrPlaybackCompatibilityMode): Boolean {
+    return mode != HdrPlaybackCompatibilityMode.OFF
+}
+
+internal fun shouldForceDolbyAudioCompatibility(
+    settings: PlayerSettings,
+    currentVideoIsDolbyVision: Boolean
+): Boolean {
+    return settings.dolbyAudioCompatibilityMode ||
+        (isHdrCompatibilityModeEnabled(settings.hdrPlaybackCompatibilityMode) && currentVideoIsDolbyVision)
+}
+
+internal fun PlayerRuntimeController.applyEffectiveDolbyPlaybackSettings(settings: PlayerSettings) {
+    val effectiveDolbyAudioCompatibility = shouldForceDolbyAudioCompatibility(
+        settings = settings,
+        currentVideoIsDolbyVision = currentVideoIsDolbyVision
+    )
+    val requiresPcmForSpeed = _exoPlayer?.let(::selectedAudioRequiresPcmForSpeed) == true
+
+    playbackSpeedAwareAudioOutputProvider?.updatePlaybackSpeed(
+        _uiState.value.playbackSpeed,
+        selectedAudioRequiresPcmForSpeed = requiresPcmForSpeed,
+        forceDolbyCompatibilityMode = effectiveDolbyAudioCompatibility
+    )
+
+    _uiState.update {
+        it.copy(tunnelingEnabled = settings.tunnelingEnabled && !effectiveDolbyAudioCompatibility)
+    }
+}
+
 internal data class StartupSubtitlePreparation(
     val fetchedSubtitles: List<Subtitle>,
     val attachedSubtitles: List<Subtitle>,
@@ -137,12 +175,16 @@ internal fun PlayerRuntimeController.initializePlayer(
             runtimeInternalPlayerEngineOverride = overrideInternalPlayerEngine
             currentInternalPlayerEngine = effectiveInternalPlayerEngine
             val showLoadingStatus = playerSettings.showPlayerLoadingStatus
+            val effectiveDolbyAudioCompatibility = shouldForceDolbyAudioCompatibility(
+                settings = playerSettings,
+                currentVideoIsDolbyVision = currentVideoIsDolbyVision
+            )
             _uiState.update {
                 it.copy(
                     internalPlayerEngine = effectiveInternalPlayerEngine,
                     frameRateMatchingMode = playerSettings.frameRateMatchingMode,
                     resizeMode = playerSettings.resizeMode,
-                    tunnelingEnabled = playerSettings.tunnelingEnabled && !playerSettings.dolbyAudioCompatibilityMode,
+                    tunnelingEnabled = playerSettings.tunnelingEnabled && !effectiveDolbyAudioCompatibility,
                     loadingMessage = if (showLoadingStatus) context.getString(R.string.player_loading_detecting_format) else null
                 )
             }
@@ -216,7 +258,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     buildUponParameters()
                         .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
                 )
-                if (playerSettings.tunnelingEnabled && !playerSettings.dolbyAudioCompatibilityMode) {
+                if (playerSettings.tunnelingEnabled && !effectiveDolbyAudioCompatibility) {
                     setParameters(
                         buildUponParameters().setTunnelingEnabled(true)
                     )
@@ -266,6 +308,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 preferDolbyAudioCompatibilityMode = playerSettings.dolbyAudioCompatibilityMode,
                 mapDV7ToHevc = playerSettings.mapDV7ToHevc,
                 disableDolbyVision = playerSettings.disableDolbyVision,
+                disableDolbyVisionForDv7 = playerSettings.disableDolbyVisionForDv7,
                 requestSdrToneMapping =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
                 convertHdr10PlusToHdr10 =
@@ -326,11 +369,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                     .build()
                 setAudioAttributes(audioAttributes, true)
-                playbackSpeedAwareAudioOutputProvider?.updatePlaybackSpeed(
-                    _uiState.value.playbackSpeed,
-                    selectedAudioRequiresPcmForSpeed(this),
-                    forceDolbyCompatibilityMode = playerSettings.dolbyAudioCompatibilityMode
-                )
+                applyEffectiveDolbyPlaybackSettings(playerSettings)
                 setPlaybackSpeed(_uiState.value.playbackSpeed)
 
                 
@@ -790,6 +829,7 @@ private class SubtitleOffsetRenderersFactory(
     private val preferDolbyAudioCompatibilityMode: Boolean,
     private val mapDV7ToHevc: Boolean,
     private val disableDolbyVision: Boolean,
+    private val disableDolbyVisionForDv7: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val convertHdr10PlusToHdr10: Boolean,
     private val forceSoftwareAv1Playback: Boolean,
@@ -866,6 +906,7 @@ private class SubtitleOffsetRenderersFactory(
     ) {
         if (
             !disableDolbyVision &&
+            !disableDolbyVisionForDv7 &&
             !requestSdrToneMapping &&
             !convertHdr10PlusToHdr10 &&
             !forceSoftwareAv1Playback &&
@@ -900,6 +941,7 @@ private class SubtitleOffsetRenderersFactory(
                 builder = videoRendererBuilder,
                 mapDV7ToHevc = mapDV7ToHevc,
                 disableDolbyVision = disableDolbyVision,
+                disableDolbyVisionForDv7 = disableDolbyVisionForDv7,
                 requestSdrToneMapping = requestSdrToneMapping,
                 convertHdr10PlusToHdr10 = convertHdr10PlusToHdr10,
                 forceSoftwareAv1Playback = forceSoftwareAv1Playback,
@@ -1028,6 +1070,7 @@ private class NuvioMediaCodecVideoRenderer(
     builder: MediaCodecVideoRenderer.Builder,
     private val mapDV7ToHevc: Boolean,
     private val disableDolbyVision: Boolean,
+    private val disableDolbyVisionForDv7: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val convertHdr10PlusToHdr10: Boolean,
     private val forceSoftwareAv1Playback: Boolean,
@@ -1036,6 +1079,7 @@ private class NuvioMediaCodecVideoRenderer(
 
     private val appContext = context.applicationContext
     private var rendererTunnelingEnabled = false
+    private var lastConfiguredInputFormat: Format? = null
 
     override fun supportsFormat(mediaCodecSelector: MediaCodecSelector, format: Format): Int {
         if (shouldForceSoftwareAv1Playback(format)) {
@@ -1166,7 +1210,7 @@ private class NuvioMediaCodecVideoRenderer(
     }
 
     override fun handleInputBufferSupplementalData(buffer: DecoderInputBuffer) {
-        if (convertHdr10PlusToHdr10) {
+        if (convertHdr10PlusToHdr10 && lastConfiguredInputFormat?.let(::isHdrVideo) == true) {
             return
         }
         super.handleInputBufferSupplementalData(buffer)
@@ -1180,10 +1224,11 @@ private class NuvioMediaCodecVideoRenderer(
         deviceNeedsNoPostProcessWorkaround: Boolean,
         tunnelingAudioSessionId: Int
     ): MediaFormat {
+        lastConfiguredInputFormat = format
         val decoderFormat =
             if (
                 forceInterpretHdrAsSdr &&
-                (ColorInfo.isTransferHdr(format.colorInfo) || format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION)
+                isHdrVideo(format)
             ) {
                 format.buildUpon().setColorInfo(ColorInfo.SDR_BT709_LIMITED).build()
             } else {
@@ -1201,7 +1246,16 @@ private class NuvioMediaCodecVideoRenderer(
     }
 
     private fun shouldForceDolbyVisionFallback(format: Format): Boolean {
-        return disableDolbyVision && format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
+        if (!isDolbyVisionVideo(format)) {
+            return false
+        }
+
+        val hdrCompatibilityRequestsFallback =
+            (requestSdrToneMapping || convertHdr10PlusToHdr10 || forceInterpretHdrAsSdr)
+
+        return disableDolbyVision ||
+            (disableDolbyVisionForDv7 && isDolbyVisionProfile7(format)) ||
+            hdrCompatibilityRequestsFallback
     }
 
     private fun shouldForceSoftwareAv1Playback(format: Format): Boolean {
@@ -1235,6 +1289,22 @@ private class NuvioMediaCodecVideoRenderer(
         )
     }
 }
+
+internal fun isDolbyVisionProfile7(format: Format): Boolean {
+    if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) {
+        return false
+    }
+
+    return format.codecs
+        ?.split(',')
+        ?.asSequence()
+        ?.map(String::trim)
+        ?.mapNotNull { codec -> DOLBY_VISION_PROFILE_REGEX.find(codec)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+        ?.any { profile -> profile == 7 }
+        ?: false
+}
+
+private val DOLBY_VISION_PROFILE_REGEX = Regex("""(?i)(?:^|\b)(?:dvhe|dvh1)\.(\d{1,2})(?:\.|$)""")
 
 private class CueNormalizingTextOutput(
     private val delegate: TextOutput,

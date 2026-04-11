@@ -94,6 +94,7 @@ import com.nuvio.tv.data.local.AudioLanguageOption
 import com.nuvio.tv.data.local.LibassRenderType
 import com.nuvio.tv.data.local.PlayerPreference
 import com.nuvio.tv.data.local.PlayerSettings
+import com.nuvio.tv.data.local.DolbyVisionProfile7Mode
 import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.data.local.StreamAutoPlaySource
 import com.nuvio.tv.data.local.TrailerSettings
@@ -148,6 +149,7 @@ fun PlaybackSettingsContent(
     var showAudioLanguageDialog by remember { mutableStateOf(false) }
     var showSecondaryAudioLanguageDialog by remember { mutableStateOf(false) }
     var showDecoderPriorityDialog by remember { mutableStateOf(false) }
+    var showDolbyVisionProfile7ModeDialog by remember { mutableStateOf(false) }
     var showHdrPlaybackCompatibilityModeDialog by remember { mutableStateOf(false) }
     var showMpvHardwareDecodeModeDialog by remember { mutableStateOf(false) }
     var showStreamAutoPlayModeDialog by remember { mutableStateOf(false) }
@@ -170,6 +172,7 @@ fun PlaybackSettingsContent(
         showAudioLanguageDialog = false
         showSecondaryAudioLanguageDialog = false
         showDecoderPriorityDialog = false
+        showDolbyVisionProfile7ModeDialog = false
         showHdrPlaybackCompatibilityModeDialog = false
         showMpvHardwareDecodeModeDialog = false
         showStreamAutoPlayModeDialog = false
@@ -211,6 +214,7 @@ fun PlaybackSettingsContent(
                 onShowAudioLanguageDialog = { openDialog { showAudioLanguageDialog = true } },
                 onShowSecondaryAudioLanguageDialog = { openDialog { showSecondaryAudioLanguageDialog = true } },
                 onShowDecoderPriorityDialog = { openDialog { showDecoderPriorityDialog = true } },
+                onShowDolbyVisionProfile7ModeDialog = { openDialog { showDolbyVisionProfile7ModeDialog = true } },
                 onShowHdrPlaybackCompatibilityModeDialog = { openDialog { showHdrPlaybackCompatibilityModeDialog = true } },
                 onShowMpvHardwareDecodeModeDialog = { openDialog { showMpvHardwareDecodeModeDialog = true } },
                 onShowLanguageDialog = { openDialog { showLanguageDialog = true } },
@@ -261,7 +265,6 @@ fun PlaybackSettingsContent(
                 onSetSkipSilence = { enabled -> coroutineScope.launch { viewModel.setSkipSilence(enabled) } },
                 onSetTunnelingEnabled = { enabled -> coroutineScope.launch { viewModel.setTunnelingEnabled(enabled) } },
                 onSetDolbyAudioCompatibilityMode = { enabled -> coroutineScope.launch { viewModel.setDolbyAudioCompatibilityMode(enabled) } },
-                onSetMapDV7ToHevc = { enabled -> coroutineScope.launch { viewModel.setMapDV7ToHevc(enabled) } },
                 onSetDisableDolbyVision = { enabled -> coroutineScope.launch { viewModel.setDisableDolbyVision(enabled) } },
                 onSetSubtitleSize = { newSize -> coroutineScope.launch { viewModel.setSubtitleSize(newSize) } },
                 onSetSubtitleVerticalOffset = { newOffset -> coroutineScope.launch { viewModel.setSubtitleVerticalOffset(newOffset) } },
@@ -292,6 +295,7 @@ fun PlaybackSettingsContent(
         showAudioLanguageDialog = showAudioLanguageDialog,
         showSecondaryAudioLanguageDialog = showSecondaryAudioLanguageDialog,
         showDecoderPriorityDialog = showDecoderPriorityDialog,
+        showDolbyVisionProfile7ModeDialog = showDolbyVisionProfile7ModeDialog,
         showHdrPlaybackCompatibilityModeDialog = showHdrPlaybackCompatibilityModeDialog,
         showMpvHardwareDecodeModeDialog = showMpvHardwareDecodeModeDialog,
         showStreamAutoPlayModeDialog = showStreamAutoPlayModeDialog,
@@ -336,6 +340,9 @@ fun PlaybackSettingsContent(
         onSetDecoderPriority = { priority ->
             coroutineScope.launch { viewModel.setDecoderPriority(priority) }
         },
+        onSetDolbyVisionProfile7Mode = { mode ->
+            coroutineScope.launch { viewModel.setDolbyVisionProfile7Mode(mode) }
+        },
         onSetHdrPlaybackCompatibilityMode = { mode ->
             coroutineScope.launch { viewModel.setHdrPlaybackCompatibilityMode(mode) }
         },
@@ -372,6 +379,7 @@ fun PlaybackSettingsContent(
         onDismissAudioLanguageDialog = ::dismissAllDialogs,
         onDismissSecondaryAudioLanguageDialog = ::dismissAllDialogs,
         onDismissDecoderPriorityDialog = ::dismissAllDialogs,
+        onDismissDolbyVisionProfile7ModeDialog = ::dismissAllDialogs,
         onDismissHdrPlaybackCompatibilityModeDialog = ::dismissAllDialogs,
         onDismissMpvHardwareDecodeModeDialog = ::dismissAllDialogs,
         onDismissStreamAutoPlayModeDialog = ::dismissAllDialogs,

@@ -717,7 +717,10 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                     playbackSpeedAwareAudioOutputProvider?.updatePlaybackSpeed(
                         event.speed,
                         selectedAudioRequiresPcmForSpeed = requiresPcm,
-                        forceDolbyCompatibilityMode = settings.dolbyAudioCompatibilityMode
+                        forceDolbyCompatibilityMode = shouldForceDolbyAudioCompatibility(
+                            settings = settings,
+                            currentVideoIsDolbyVision = currentVideoIsDolbyVision
+                        )
                     )
                     _exoPlayer?.let { player ->
                         player.setPlaybackSpeed(event.speed)

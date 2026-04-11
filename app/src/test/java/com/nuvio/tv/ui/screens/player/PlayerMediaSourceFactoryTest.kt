@@ -1,8 +1,13 @@
 package com.nuvio.tv.ui.screens.player
 
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.Format
+import com.nuvio.tv.data.local.HdrPlaybackCompatibilityMode
+import com.nuvio.tv.data.local.PlayerSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerMediaSourceFactoryTest {
@@ -68,5 +73,62 @@ class PlayerMediaSourceFactoryTest {
         )
 
         assertEquals(MimeTypes.VIDEO_MATROSKA, mimeType)
+    }
+
+    @Test
+    fun `isDolbyVisionProfile7 matches dvhe profile 7 codecs`() {
+        val format = Format.Builder()
+            .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+            .setCodecs("dvhe.07.06")
+            .build()
+
+        assertTrue(isDolbyVisionProfile7(format))
+    }
+
+    @Test
+    fun `isDolbyVisionProfile7 ignores non profile 7 dolby vision codecs`() {
+        val format = Format.Builder()
+            .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+            .setCodecs("dvh1.05.06")
+            .build()
+
+        assertFalse(isDolbyVisionProfile7(format))
+    }
+
+    @Test
+    fun `isHdrVideo treats dolby vision as hdr`() {
+        val format = Format.Builder()
+            .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+            .build()
+
+        assertTrue(isHdrVideo(format))
+    }
+
+    @Test
+    fun `shouldForceDolbyAudioCompatibility enables pcm for dolby vision when hdr mode is active`() {
+        val settings = PlayerSettings(
+            hdrPlaybackCompatibilityMode = HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR
+        )
+
+        assertTrue(
+            shouldForceDolbyAudioCompatibility(
+                settings = settings,
+                currentVideoIsDolbyVision = true
+            )
+        )
+    }
+
+    @Test
+    fun `shouldForceDolbyAudioCompatibility keeps normal audio path for non dolby hdr content`() {
+        val settings = PlayerSettings(
+            hdrPlaybackCompatibilityMode = HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR
+        )
+
+        assertFalse(
+            shouldForceDolbyAudioCompatibility(
+                settings = settings,
+                currentVideoIsDolbyVision = false
+            )
+        )
     }
 }

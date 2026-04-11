@@ -181,6 +181,7 @@ data class PlayerSettings(
     // Dolby Vision Profile 7 -> HEVC fallback (requires forked ExoPlayer)
     val mapDV7ToHevc: Boolean = false,
     val disableDolbyVision: Boolean = false,
+    val disableDolbyVisionForDv7: Boolean = false,
     val hdrPlaybackCompatibilityMode: HdrPlaybackCompatibilityMode = HdrPlaybackCompatibilityMode.OFF,
     val mpvHardwareDecodeMode: MpvHardwareDecodeMode = MpvHardwareDecodeMode.AUTO_SAFE,
     // Display settings
@@ -255,6 +256,12 @@ enum class HdrPlaybackCompatibilityMode {
     EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
 }
 
+enum class DolbyVisionProfile7Mode {
+    OFF,
+    MAP_TO_HEVC,
+    DISABLE_DV7
+}
+
 enum class PlayerPreference {
     INTERNAL,
     EXTERNAL,
@@ -320,6 +327,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val dolbyAudioCompatibilityModeKey = booleanPreferencesKey("dolby_audio_compatibility_mode")
     private val mapDV7ToHevcKey = booleanPreferencesKey("map_dv7_to_hevc")
     private val disableDolbyVisionKey = booleanPreferencesKey("disable_dolby_vision")
+    private val disableDolbyVisionForDv7Key = booleanPreferencesKey("disable_dolby_vision_for_dv7")
     private val requestSdrToneMappingKey = booleanPreferencesKey("request_sdr_tone_mapping")
     private val forceInterpretHdrAsSdrKey = booleanPreferencesKey("force_interpret_hdr_as_sdr")
     private val hdrPlaybackCompatibilityModeKey = stringPreferencesKey("hdr_playback_compatibility_mode")
@@ -475,6 +483,8 @@ class PlayerSettingsDataStore @Inject constructor(
                 dolbyAudioCompatibilityMode = prefs[dolbyAudioCompatibilityModeKey] ?: false,
                 mapDV7ToHevc = prefs[mapDV7ToHevcKey] ?: false,
                 disableDolbyVision = prefs[disableDolbyVisionKey] ?: false,
+                disableDolbyVisionForDv7 =
+                    prefs[disableDolbyVisionForDv7Key] ?: (prefs[disableDolbyVisionKey] ?: false),
                 hdrPlaybackCompatibilityMode = parseHdrPlaybackCompatibilityMode(
                     prefs[hdrPlaybackCompatibilityModeKey],
                     prefs[requestSdrToneMappingKey] ?: false,
@@ -896,6 +906,14 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setDisableDolbyVision(enabled: Boolean) {
         store().edit { prefs ->
             prefs[disableDolbyVisionKey] = enabled
+        }
+    }
+
+    suspend fun setDolbyVisionProfile7Mode(mode: DolbyVisionProfile7Mode) {
+        store().edit { prefs ->
+            prefs[mapDV7ToHevcKey] = mode == DolbyVisionProfile7Mode.MAP_TO_HEVC
+            prefs[disableDolbyVisionForDv7Key] = mode == DolbyVisionProfile7Mode.DISABLE_DV7
+            prefs[disableDolbyVisionKey] = false
         }
     }
 
