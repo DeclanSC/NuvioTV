@@ -1250,6 +1250,8 @@
 
     <!-- PlaybackAudioSettings -->
     <string name="audio_passthrough_info">Yüksek kaliteli ses geçidi (TrueHD, DTS, AC-3) desteklenen HDMI veya uyumlu ses alıcı / arayüz bar donanımlarına bağlanıldığında yazılımın çözümüne bırakılmadan direkt doğrudan iletilir.</string>
+    <string name="audio_dolby_compatibility_title">Dolby Ses Uyumluluk Modu</string>
+    <string name="audio_dolby_compatibility_sub">Dolby passthrough\'u kapatır ve mevcutsa AC-3, E-AC-3 ve TrueHD seslerini uygulama tarafında çözer. Video var ama ses yok yaşayan cihazlarda yardımcı olur.</string>
     <string name="audio_dv_title">DV7 - HEVC Geri Yansıması</string>
     <string name="audio_disable_dolby_vision_title">Dolby Vision\'i devre dışı bırak</string>
     <string name="audio_disable_dolby_vision_sub">Tüm Dolby Vision profillerini engeller ve mümkün olduğunda HEVC, AVC veya AV1\'e geri döner.</string>

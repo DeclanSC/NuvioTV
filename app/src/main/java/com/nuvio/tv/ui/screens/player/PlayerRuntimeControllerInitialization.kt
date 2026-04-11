@@ -28,6 +28,7 @@ import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -117,7 +118,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     internalPlayerEngine = effectiveInternalPlayerEngine,
                     frameRateMatchingMode = playerSettings.frameRateMatchingMode,
                     resizeMode = playerSettings.resizeMode,
-                    tunnelingEnabled = playerSettings.tunnelingEnabled,
+                    tunnelingEnabled = playerSettings.tunnelingEnabled && !playerSettings.dolbyAudioCompatibilityMode,
                     loadingMessage = if (showLoadingStatus) context.getString(R.string.player_loading_detecting_format) else null
                 )
             }
@@ -189,7 +190,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     buildUponParameters()
                         .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
                 )
-                if (playerSettings.tunnelingEnabled) {
+                if (playerSettings.tunnelingEnabled && !playerSettings.dolbyAudioCompatibilityMode) {
                     setParameters(
                         buildUponParameters().setTunnelingEnabled(true)
                     )
@@ -236,6 +237,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 gainAudioProcessor = gainAudioProcessor,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 onPlaybackSpeedAwareAudioOutputProviderCreated = { playbackSpeedAwareAudioOutputProvider = it },
+                preferDolbyAudioCompatibilityMode = playerSettings.dolbyAudioCompatibilityMode,
                 mapDV7ToHevc = playerSettings.mapDV7ToHevc,
                 disableDolbyVision = playerSettings.disableDolbyVision,
                 requestSdrToneMapping =
@@ -294,7 +296,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                 setAudioAttributes(audioAttributes, true)
                 playbackSpeedAwareAudioOutputProvider?.updatePlaybackSpeed(
                     _uiState.value.playbackSpeed,
-                    selectedAudioRequiresPcmForSpeed(this)
+                    selectedAudioRequiresPcmForSpeed(this),
+                    forceDolbyCompatibilityMode = playerSettings.dolbyAudioCompatibilityMode
                 )
                 setPlaybackSpeed(_uiState.value.playbackSpeed)
 
@@ -720,11 +723,70 @@ private class SubtitleOffsetRenderersFactory(
     private val gainAudioProcessor: GainAudioProcessor,
     private val playbackSpeedProvider: () -> Float,
     private val onPlaybackSpeedAwareAudioOutputProviderCreated: (PlaybackSpeedAwareAudioOutputProvider) -> Unit,
+    private val preferDolbyAudioCompatibilityMode: Boolean,
     private val mapDV7ToHevc: Boolean,
     private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : DefaultRenderersFactory(context) {
+
+    override fun buildAudioRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        audioSink: AudioSink,
+        eventHandler: Handler,
+        eventListener: AudioRendererEventListener,
+        out: ArrayList<Renderer>
+    ) {
+        if (!preferDolbyAudioCompatibilityMode) {
+            super.buildAudioRenderers(
+                context,
+                extensionRendererMode,
+                mediaCodecSelector,
+                enableDecoderFallback,
+                audioSink,
+                eventHandler,
+                eventListener,
+                out
+            )
+            return
+        }
+
+        val effectiveExtensionRendererMode =
+            if (extensionRendererMode == EXTENSION_RENDERER_MODE_OFF) {
+                EXTENSION_RENDERER_MODE_ON
+            } else {
+                extensionRendererMode
+            }
+
+        val dolbyCompatibilitySelector = MediaCodecSelector {
+                mimeType,
+                requiresSecureDecoder,
+                requiresTunnelingDecoder ->
+            if (isDolbyCompatibilityMimeType(mimeType)) {
+                emptyList()
+            } else {
+                mediaCodecSelector.getDecoderInfos(
+                    mimeType,
+                    requiresSecureDecoder,
+                    requiresTunnelingDecoder
+                )
+            }
+        }
+
+        super.buildAudioRenderers(
+            context,
+            effectiveExtensionRendererMode,
+            dolbyCompatibilitySelector,
+            enableDecoderFallback,
+            audioSink,
+            eventHandler,
+            eventListener,
+            out
+        )
+    }
 
     override fun buildVideoRenderers(
         context: Context,
@@ -818,7 +880,10 @@ private class SubtitleOffsetRenderersFactory(
             .setMaxPlaybackSpeed(PLAYBACK_SPEEDS.maxOrNull() ?: 2f)
             .build()
         val audioOutputProvider = PlaybackSpeedAwareAudioOutputProvider(baseAudioOutputProvider)
-        audioOutputProvider.updatePlaybackSpeed(playbackSpeedProvider())
+        audioOutputProvider.updatePlaybackSpeed(
+            playbackSpeedProvider(),
+            forceDolbyCompatibilityMode = preferDolbyAudioCompatibilityMode
+        )
         onPlaybackSpeedAwareAudioOutputProviderCreated(audioOutputProvider)
 
         return DefaultAudioSink.Builder(context)
@@ -846,6 +911,13 @@ private class SubtitleOffsetRenderersFactory(
             out[index] = SubtitleOffsetRenderer(out[index], subtitleDelayUsProvider)
         }
     }
+}
+
+private fun isDolbyCompatibilityMimeType(mimeType: String): Boolean {
+    return mimeType == MimeTypes.AUDIO_AC3 ||
+        mimeType == MimeTypes.AUDIO_E_AC3 ||
+        mimeType == MimeTypes.AUDIO_E_AC3_JOC ||
+        mimeType == MimeTypes.AUDIO_TRUEHD
 }
 
 private fun addOptionalVideoRenderer(

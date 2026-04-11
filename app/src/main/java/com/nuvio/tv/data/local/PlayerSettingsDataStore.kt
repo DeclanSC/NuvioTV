@@ -176,6 +176,7 @@ data class PlayerSettings(
     val pauseOverlayEnabled: Boolean = true,
     val osdClockEnabled: Boolean = true,
     val skipIntroEnabled: Boolean = true,
+    val dolbyAudioCompatibilityMode: Boolean = false,
     // Dolby Vision Profile 7 -> HEVC fallback (requires forked ExoPlayer)
     val mapDV7ToHevc: Boolean = false,
     val disableDolbyVision: Boolean = false,
@@ -314,6 +315,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val pauseOverlayEnabledKey = booleanPreferencesKey("pause_overlay_enabled")
     private val osdClockEnabledKey = booleanPreferencesKey("osd_clock_enabled")
     private val skipIntroEnabledKey = booleanPreferencesKey("skip_intro_enabled")
+    private val dolbyAudioCompatibilityModeKey = booleanPreferencesKey("dolby_audio_compatibility_mode")
     private val mapDV7ToHevcKey = booleanPreferencesKey("map_dv7_to_hevc")
     private val disableDolbyVisionKey = booleanPreferencesKey("disable_dolby_vision")
     private val requestSdrToneMappingKey = booleanPreferencesKey("request_sdr_tone_mapping")
@@ -468,6 +470,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 pauseOverlayEnabled = prefs[pauseOverlayEnabledKey] ?: true,
                 osdClockEnabled = prefs[osdClockEnabledKey] ?: true,
                 skipIntroEnabled = prefs[skipIntroEnabledKey] ?: true,
+                dolbyAudioCompatibilityMode = prefs[dolbyAudioCompatibilityModeKey] ?: false,
                 mapDV7ToHevc = prefs[mapDV7ToHevcKey] ?: false,
                 disableDolbyVision = prefs[disableDolbyVisionKey] ?: false,
                 hdrPlaybackCompatibilityMode = parseHdrPlaybackCompatibilityMode(
@@ -664,6 +667,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setSkipIntroEnabled(enabled: Boolean) {
         store().edit { prefs ->
             prefs[skipIntroEnabledKey] = enabled
+        }
+    }
+
+    suspend fun setDolbyAudioCompatibilityMode(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[dolbyAudioCompatibilityModeKey] = enabled
         }
     }
 

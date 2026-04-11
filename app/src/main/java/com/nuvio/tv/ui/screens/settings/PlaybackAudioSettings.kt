@@ -71,6 +71,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetTrailerDelaySeconds: (Int) -> Unit,
     onSetSkipSilence: (Boolean) -> Unit,
     onSetTunnelingEnabled: (Boolean) -> Unit,
+    onSetDolbyAudioCompatibilityMode: (Boolean) -> Unit,
     onSetMapDV7ToHevc: (Boolean) -> Unit,
     onSetDisableDolbyVision: (Boolean) -> Unit,
     onItemFocused: () -> Unit = {},
@@ -211,6 +212,18 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
             title = stringResource(R.string.audio_decoder_priority),
             subtitle = decoderName,
             onClick = onShowDecoderPriorityDialog,
+            onFocused = onItemFocused,
+            enabled = enabled
+        )
+    }
+
+    item(key = "audio_dolby_compatibility_mode") {
+        ToggleSettingsItem(
+            icon = Icons.Default.Tune,
+            title = stringResource(R.string.audio_dolby_compatibility_title),
+            subtitle = stringResource(R.string.audio_dolby_compatibility_sub),
+            isChecked = playerSettings.dolbyAudioCompatibilityMode,
+            onCheckedChange = onSetDolbyAudioCompatibilityMode,
             onFocused = onItemFocused,
             enabled = enabled
         )

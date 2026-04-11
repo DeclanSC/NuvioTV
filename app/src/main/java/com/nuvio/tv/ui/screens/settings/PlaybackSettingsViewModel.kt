@@ -117,6 +117,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setSkipIntroEnabled(enabled)
     }
 
+    suspend fun setDolbyAudioCompatibilityMode(enabled: Boolean) {
+        playerSettingsDataStore.setDolbyAudioCompatibilityMode(enabled)
+    }
+
     suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode) {
         playerSettingsDataStore.setFrameRateMatchingMode(mode)
     }

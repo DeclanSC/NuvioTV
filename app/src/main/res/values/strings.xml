@@ -1253,6 +1253,8 @@
 
     <!-- PlaybackAudioSettings -->
     <string name="audio_passthrough_info">Audio passthrough (TrueHD, DTS, AC-3, etc.) is automatic. When connected to a compatible AV receiver or soundbar via HDMI, lossless audio is sent as-is without decoding.</string>
+    <string name="audio_dolby_compatibility_title">Dolby Audio Compatibility Mode</string>
+    <string name="audio_dolby_compatibility_sub">Disables Dolby passthrough and forces app-side decoding for AC-3, E-AC-3, and TrueHD when available. Helps on devices that show video but have no sound.</string>
     <string name="audio_dv_title">DV7 - HEVC Fallback</string>
     <string name="audio_disable_dolby_vision_title">Disable Dolby Vision</string>
     <string name="audio_disable_dolby_vision_sub">Blocks all Dolby Vision profiles and falls back to HEVC, AVC, or AV1 when possible.</string>

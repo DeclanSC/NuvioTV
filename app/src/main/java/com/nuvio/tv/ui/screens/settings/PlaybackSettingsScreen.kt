@@ -257,6 +257,7 @@ fun PlaybackSettingsContent(
                 onSetTrailerDelaySeconds = { seconds -> coroutineScope.launch { viewModel.setTrailerDelaySeconds(seconds) } },
                 onSetSkipSilence = { enabled -> coroutineScope.launch { viewModel.setSkipSilence(enabled) } },
                 onSetTunnelingEnabled = { enabled -> coroutineScope.launch { viewModel.setTunnelingEnabled(enabled) } },
+                onSetDolbyAudioCompatibilityMode = { enabled -> coroutineScope.launch { viewModel.setDolbyAudioCompatibilityMode(enabled) } },
                 onSetMapDV7ToHevc = { enabled -> coroutineScope.launch { viewModel.setMapDV7ToHevc(enabled) } },
                 onSetDisableDolbyVision = { enabled -> coroutineScope.launch { viewModel.setDisableDolbyVision(enabled) } },
                 onSetSubtitleSize = { newSize -> coroutineScope.launch { viewModel.setSubtitleSize(newSize) } },
