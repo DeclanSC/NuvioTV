@@ -251,6 +251,7 @@ enum class MpvHardwareDecodeMode {
 enum class HdrPlaybackCompatibilityMode {
     OFF,
     TONE_MAP_HDR_TO_SDR,
+    EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10,
     EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
 }
 
@@ -853,6 +854,8 @@ class PlayerSettingsDataStore @Inject constructor(
     ): HdrPlaybackCompatibilityMode {
         return when (value) {
             "TONE_MAP_HDR_TO_SDR" -> HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR
+            "EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10" ->
+                HdrPlaybackCompatibilityMode.EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10
             "EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR" -> HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
             "OFF", null -> when {
                 forceInterpretHdrAsSdr -> HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR

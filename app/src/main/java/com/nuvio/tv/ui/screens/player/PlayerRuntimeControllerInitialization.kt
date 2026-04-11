@@ -20,6 +20,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.decoder.DecoderInputBuffer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -257,6 +258,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                 disableDolbyVision = playerSettings.disableDolbyVision,
                 requestSdrToneMapping =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
+                convertHdr10PlusToHdr10 =
+                    playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10,
                 forceInterpretHdrAsSdr =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
             ).setExtensionRendererMode(playerSettings.decoderPriority)
@@ -774,6 +777,7 @@ private class SubtitleOffsetRenderersFactory(
     private val mapDV7ToHevc: Boolean,
     private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
+    private val convertHdr10PlusToHdr10: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : DefaultRenderersFactory(context) {
 
@@ -845,7 +849,7 @@ private class SubtitleOffsetRenderersFactory(
         allowedVideoJoiningTimeMs: Long,
         out: ArrayList<Renderer>
     ) {
-        if (!disableDolbyVision && !requestSdrToneMapping && !forceInterpretHdrAsSdr) {
+        if (!disableDolbyVision && !requestSdrToneMapping && !convertHdr10PlusToHdr10 && !forceInterpretHdrAsSdr) {
             super.buildVideoRenderers(
                 context,
                 extensionRendererMode,
@@ -876,6 +880,7 @@ private class SubtitleOffsetRenderersFactory(
                 mapDV7ToHevc = mapDV7ToHevc,
                 disableDolbyVision = disableDolbyVision,
                 requestSdrToneMapping = requestSdrToneMapping,
+                convertHdr10PlusToHdr10 = convertHdr10PlusToHdr10,
                 forceInterpretHdrAsSdr = forceInterpretHdrAsSdr
             )
         )
@@ -1002,6 +1007,7 @@ private class NuvioMediaCodecVideoRenderer(
     private val mapDV7ToHevc: Boolean,
     private val disableDolbyVision: Boolean,
     private val requestSdrToneMapping: Boolean,
+    private val convertHdr10PlusToHdr10: Boolean,
     private val forceInterpretHdrAsSdr: Boolean
 ) : MediaCodecVideoRenderer(builder) {
 
@@ -1128,6 +1134,13 @@ private class NuvioMediaCodecVideoRenderer(
                 setIsInputSdrToneMapped(true)
             }
         }
+    }
+
+    override fun handleInputBufferSupplementalData(buffer: DecoderInputBuffer) {
+        if (convertHdr10PlusToHdr10) {
+            return
+        }
+        super.handleInputBufferSupplementalData(buffer)
     }
 
     override fun getMediaFormat(

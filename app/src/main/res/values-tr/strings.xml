@@ -376,6 +376,8 @@
     <string name="audio_hdr_compat_mode_off_desc">Normal HDR veya Dolby Vision oynatmayı kullanır.</string>
     <string name="audio_hdr_compat_mode_tone_map">HDR - SDR Ton Eşleme</string>
     <string name="audio_hdr_compat_mode_tone_map_desc">Oynatma sırasında HDR videoyu SDR\'ye dönüştürür. Cihazınızda HDR veya Dolby Vision renkleri bozuksa bunu deneyin.</string>
+    <string name="audio_hdr_compat_mode_hdr10plus_to_hdr10">Deneysel: HDR10+\'ı HDR10\'a Dönüştür</string>
+    <string name="audio_hdr_compat_mode_hdr10plus_to_hdr10_desc">Oynatma sırasında HDR10+ dinamik metadata bilgisini yok sayar ve uyumlu akışlarda statik HDR10\'a geri düşmeyi dener.</string>
     <string name="audio_hdr_compat_mode_force_sdr">Deneysel: HDR\'yi SDR Gibi Yorumla</string>
     <string name="audio_hdr_compat_mode_force_sdr_desc">HDR bilgisini yok sayıp videoyu SDR gibi oynatır. Yalnızca diğer seçenekler işe yaramazsa deneyin.</string>
     <string name="audio_hdr_to_sdr_sub">Oynatma sırasında HDR videoyu SDR\'ye dönüştürür. Cihazınızda HDR veya Dolby Vision renkleri bozuksa bunu deneyin.</string>

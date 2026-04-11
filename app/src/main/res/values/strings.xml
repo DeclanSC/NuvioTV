@@ -399,6 +399,8 @@
     <string name="audio_hdr_compat_mode_off_desc">Use normal HDR or Dolby Vision playback.</string>
     <string name="audio_hdr_compat_mode_tone_map">HDR - SDR Tone Mapping</string>
     <string name="audio_hdr_compat_mode_tone_map_desc">Converts HDR video to SDR during playback. Try this if HDR or Dolby Vision colors look wrong on your device.</string>
+    <string name="audio_hdr_compat_mode_hdr10plus_to_hdr10">Experimental: Convert HDR10+ to HDR10</string>
+    <string name="audio_hdr_compat_mode_hdr10plus_to_hdr10_desc">Strips HDR10+ dynamic metadata during playback so compatible streams can fall back to static HDR10.</string>
     <string name="audio_hdr_compat_mode_force_sdr">Experimental: Force Interpret HDR as SDR</string>
     <string name="audio_hdr_compat_mode_force_sdr_desc">Ignores HDR metadata and plays the video as SDR. Use only if the other options do not help.</string>
     <string name="audio_hdr_to_sdr_sub">Converts HDR video to SDR during playback. Try this if HDR or Dolby Vision colors look wrong on your device.</string>

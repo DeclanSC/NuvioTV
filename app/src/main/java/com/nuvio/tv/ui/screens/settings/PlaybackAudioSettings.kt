@@ -271,6 +271,8 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
             HdrPlaybackCompatibilityMode.OFF -> stringResource(R.string.audio_hdr_compat_mode_off)
             HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR ->
                 stringResource(R.string.audio_hdr_compat_mode_tone_map)
+            HdrPlaybackCompatibilityMode.EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10 ->
+                stringResource(R.string.audio_hdr_compat_mode_hdr10plus_to_hdr10)
             HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR ->
                 stringResource(R.string.audio_hdr_compat_mode_force_sdr)
         }
@@ -403,6 +405,11 @@ private fun HdrPlaybackCompatibilityModeDialog(
             HdrPlaybackCompatibilityMode.TONE_MAP_HDR_TO_SDR,
             stringResource(R.string.audio_hdr_compat_mode_tone_map),
             stringResource(R.string.audio_hdr_compat_mode_tone_map_desc)
+        ),
+        Triple(
+            HdrPlaybackCompatibilityMode.EXPERIMENTAL_CONVERT_HDR10_PLUS_TO_HDR10,
+            stringResource(R.string.audio_hdr_compat_mode_hdr10plus_to_hdr10),
+            stringResource(R.string.audio_hdr_compat_mode_hdr10plus_to_hdr10_desc)
         ),
         Triple(
             HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR,
