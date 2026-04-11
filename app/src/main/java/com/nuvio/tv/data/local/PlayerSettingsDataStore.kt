@@ -150,6 +150,7 @@ data class BufferSettings(
 object AudioLanguageOption {
     const val DEFAULT = "default"  // Use media file default
     const val DEVICE = "device"    // Use device locale
+    const val ORIGINAL = "original"  // Use content's original language (from TMDB)
 }
 
 /**
@@ -201,7 +202,7 @@ data class PlayerSettings(
     val streamReuseLastLinkCacheHours: Int = 24,
     val subtitleOrganizationMode: SubtitleOrganizationMode = SubtitleOrganizationMode.NONE,
     val addonSubtitleStartupMode: AddonSubtitleStartupMode = AddonSubtitleStartupMode.ALL_SUBTITLES,
-    val resizeMode: Int = 0 
+    val resizeMode: Int = 0
 )
 
 enum class StreamAutoPlayMode {
@@ -877,6 +878,7 @@ class PlayerSettingsDataStore @Inject constructor(
         return when (normalized) {
             AudioLanguageOption.DEFAULT,
             AudioLanguageOption.DEVICE,
+            AudioLanguageOption.ORIGINAL,
             SUBTITLE_LANGUAGE_FORCED -> null
             else -> normalized
         }

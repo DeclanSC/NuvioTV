@@ -14,6 +14,7 @@ import androidx.media3.common.ColorInfo
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.text.Cue
@@ -71,10 +72,18 @@ private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
     url: String,
     headers: Map<String, String>
 ) {
+    currentStreamMimeType?.let { resolvedMimeType ->
+        Log.d(
+            PlayerRuntimeController.TAG,
+            "Resolved stream mimeType=$resolvedMimeType for url=$url"
+        )
+        return
+    }
     currentStreamMimeType = PlayerMediaSourceFactory.probeMimeType(
         url = url,
         headers = headers,
-        filename = currentFilename
+        filename = currentFilename,
+        responseHeaders = currentStreamResponseHeaders
     )
     Log.d(
         PlayerRuntimeController.TAG,
@@ -100,12 +109,16 @@ internal fun PlayerRuntimeController.initializePlayer(
                 startupEngineFailoverTriggered = false
             }
             resetLoadingOverlayForNewStream()
+            hasTriedAudioPcmFallback = false
+            hasTriedDv7HevcFallback = false
             mpvDelayStartAfterAfrSwitch = false
             val playerSettings = playerSettingsDataStore.playerSettings.first()
+            cachedDecoderPriority = playerSettings.decoderPriority
             val preferredAudioLanguages = resolvePreferredAudioLanguages(
                 preferredAudioLanguage = playerSettings.preferredAudioLanguage,
                 secondaryPreferredAudioLanguage = playerSettings.secondaryPreferredAudioLanguage,
-                deviceLanguages = resolveDeviceAudioLanguages()
+                deviceLanguages = resolveDeviceAudioLanguages(),
+                contentOriginalLanguage = contentLanguage
             )
             mpvPreferredAudioLanguages = preferredAudioLanguages
             mpvHardwareDecodeModeSetting = playerSettings.mpvHardwareDecodeMode
@@ -130,10 +143,6 @@ internal fun PlayerRuntimeController.initializePlayer(
                     resolutionMatchingEnabled = playerSettings.resolutionMatchingEnabled
                 )
             }
-            resolveCurrentStreamMimeType(
-                url = url,
-                headers = headers
-            )
             if (effectiveInternalPlayerEngine == InternalPlayerEngine.MVP_PLAYER) {
                 mpvInitializationInProgress = true
                 try {
@@ -158,6 +167,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                 }
                 return@launch
             }
+            resolveCurrentStreamMimeType(
+                url = url,
+                headers = headers
+            )
             mpvInitializationInProgress = false
             val startupSubtitlePreparation = prepareStreamStartSubtitles(playerSettings, showLoadingStatus)
             afrJob.await()
@@ -174,15 +187,17 @@ internal fun PlayerRuntimeController.initializePlayer(
                 requestedLibassRenderType == AssRenderType.OVERLAY_CANVAS -> AssRenderType.EFFECTS_CANVAS
                 else -> requestedLibassRenderType
             }
-            val loadControl = DefaultLoadControl.Builder()
-                .setTargetBufferBytes(100 * 1024 * 1024)
-                .setBufferDurationsMs(
-                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                    70_000,
-                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                    5_000
-                )
-                .build()
+            val loadControl = run {
+                DefaultLoadControl.Builder()
+                    .setTargetBufferBytes(100 * 1024 * 1024)
+                    .setBufferDurationsMs(
+                        DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                        70_000,
+                        DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                        5_000
+                    )
+                    .build()
+            }
 
             
             trackSelector = DefaultTrackSelector(context).apply {
@@ -245,7 +260,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 forceInterpretHdrAsSdr =
                     playerSettings.hdrPlaybackCompatibilityMode == HdrPlaybackCompatibilityMode.EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR
             ).setExtensionRendererMode(playerSettings.decoderPriority)
-                .setMapDV7ToHevc(playerSettings.mapDV7ToHevc)
+                .setMapDV7ToHevc(playerSettings.mapDV7ToHevc || forceDv7ToHevc)
 
             if (showLoadingStatus) _uiState.update { it.copy(loadingMessage = context.getString(R.string.player_loading_building)) }
             val buildDefaultPlayer = {
@@ -253,9 +268,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                     extractorsFactory = null,
                     subtitleParserFactory = null
                 )
+                val playerDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, headers)
                 ExoPlayer.Builder(context)
                     .setTrackSelector(trackSelector!!)
-                    .setMediaSourceFactory(DefaultMediaSourceFactory(context, extractorsFactory))
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory, extractorsFactory))
                     .setRenderersFactory(renderersFactory)
                     .setLoadControl(loadControl)
                     .setReleaseTimeoutMs(3000)
@@ -263,15 +279,17 @@ internal fun PlayerRuntimeController.initializePlayer(
             }
 
             _exoPlayer = if (useLibass) {
+                val playerDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, headers)
                 ExoPlayer.Builder(context)
                     .setLoadControl(loadControl)
                     .setTrackSelector(trackSelector!!)
-                    .setMediaSourceFactory(DefaultMediaSourceFactory(context, extractorsFactory))
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory, extractorsFactory))
                     .setReleaseTimeoutMs(3000)
                     .buildWithAssSupportCompat(
                         context = context,
                         renderType = libassRenderType,
                         playerMediaSourceFactory = mediaSourceFactory,
+                        dataSourceFactory = playerDataSourceFactory,
                         extractorsFactory = extractorsFactory,
                         renderersFactory = renderersFactory
                     )
@@ -331,9 +349,12 @@ internal fun PlayerRuntimeController.initializePlayer(
                 val startupSubtitleConfigurations = buildStartupSubtitleConfigurations(startupSubtitlePreparation)
                 setMediaSource(
                     mediaSourceFactory.createMediaSource(
+                        context = context,
                         url = url,
                         headers = headers,
                         subtitleConfigurations = startupSubtitleConfigurations,
+                        filename = currentFilename,
+                        responseHeaders = currentStreamResponseHeaders,
                         mimeTypeOverride = currentStreamMimeType
                     )
                 )
@@ -429,10 +450,19 @@ internal fun PlayerRuntimeController.initializePlayer(
                     override fun onRenderedFirstFrame() {
                         hasRenderedFirstFrame = true
                         resetErrorRetryState()
+                        // Restore speed after PCM fallback — audio sink is already
+                        // configured in PCM mode and won't revert to passthrough.
+                        if (hasTriedAudioPcmFallback) {
+                            _exoPlayer?.playbackParameters = PlaybackParameters(1f)
+                        }
                         _uiState.update {
                             it.copy(
                                 showLoadingOverlay = false,
                                 loadingMessage = null,
+                                // Snap the loading-logo fill to 100% so the logo
+                                // appears fully filled as the overlay fades out
+                                // (rather than freezing at the partial buffer %).
+                                loadingProgress = if (it.loadingProgress != null) 1f else null,
                                 showPlayerEngineSwitchInfo = false
                             )
                         }
@@ -442,18 +472,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                         if (isReleasingPlayer && error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
                             return
                         }
-                        val detailedError = buildString {
-                            append(error.message ?: "Playback error")
-                            val cause = error.cause
-                            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
-                                append(" (HTTP ${cause.responseCode})")
-                            } else if (cause != null) {
-                                append(": ${cause.message}")
-                            }
-                            append(" [${error.errorCode}]")
-                        }
-                        val responseCode =
-                            (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+                        val detailedError = error.toDisplayMessage()
+                        val responseCode = error.findInvalidResponseCodeException()?.responseCode
                         if (responseCode == 416 && !hasRetriedCurrentStreamAfter416) {
                             retryCurrentStreamFromStartAfter416()
                             return
@@ -466,7 +486,16 @@ internal fun PlayerRuntimeController.initializePlayer(
                             return
                         }
                         // Attempt automatic recovery for transient errors.
-                        if (attemptAutoRetry(error, detailedError)) {
+                        if (tryAudioTrackPcmFallback(error)) {
+                            return
+                        }
+                        if (tryDv7HevcFallback(error)) {
+                            return
+                        }
+                        if (attemptStartupRecovery(error, detailedError)) {
+                            return
+                        }
+                        if (hasRenderedFirstFrame && attemptAutoRetry(error, detailedError)) {
                             return
                         }
                         _uiState.update {
@@ -493,7 +522,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             }
             _uiState.update {
                 it.copy(
-                    error = e.message ?: "Failed to initialize player",
+                    error = e.toDisplayMessage("Failed to initialize player"),
                     showLoadingOverlay = false
                 )
             }
@@ -504,7 +533,8 @@ internal fun PlayerRuntimeController.initializePlayer(
 internal fun resolvePreferredAudioLanguages(
     preferredAudioLanguage: String,
     secondaryPreferredAudioLanguage: String?,
-    deviceLanguages: List<String>
+    deviceLanguages: List<String>,
+    contentOriginalLanguage: String? = null
 ): List<String> {
     fun normalize(language: String?): String? {
         val normalized = language
@@ -515,6 +545,7 @@ internal fun resolvePreferredAudioLanguages(
         return when (normalized) {
             AudioLanguageOption.DEFAULT,
             AudioLanguageOption.DEVICE,
+            AudioLanguageOption.ORIGINAL,
             SUBTITLE_LANGUAGE_FORCED -> null
             else -> normalized
         }
@@ -529,6 +560,21 @@ internal fun resolvePreferredAudioLanguages(
             .mapNotNull(::normalize)
             + listOfNotNull(normalize(secondaryPreferredAudioLanguage))
             ).distinct()
+        AudioLanguageOption.ORIGINAL -> {
+            val originalLang = normalize(contentOriginalLanguage)
+            if (originalLang != null) {
+                listOfNotNull(
+                    originalLang,
+                    normalize(secondaryPreferredAudioLanguage)
+                ).distinct()
+            } else {
+                // Fallback to device languages when original language is unknown
+                (deviceLanguages
+                    .mapNotNull(::normalize)
+                    + listOfNotNull(normalize(secondaryPreferredAudioLanguage))
+                ).distinct()
+            }
+        }
         else -> listOfNotNull(
             normalize(preferredAudioLanguage),
             normalize(secondaryPreferredAudioLanguage)
@@ -711,7 +757,8 @@ internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     _uiState.update { state ->
         state.copy(
             showLoadingOverlay = state.loadingOverlayEnabled,
-            showControls = false
+            showControls = false,
+            loadingProgress = null
         )
     }
 }
