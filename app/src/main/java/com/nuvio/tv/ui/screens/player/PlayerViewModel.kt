@@ -81,6 +81,26 @@ class PlayerViewModel @Inject constructor(
         scope = viewModelScope
     )
 
+    data class CurrentEpisodeInfo(
+        val videoId: String,
+        val season: Int?,
+        val episode: Int?,
+        val episodeTitle: String?
+    )
+
+    fun getCurrentEpisodeInfo(): CurrentEpisodeInfo {
+        return CurrentEpisodeInfo(
+            videoId = controller.currentVideoId ?: "",
+            season = controller.currentSeason,
+            episode = controller.currentEpisode,
+            episodeTitle = controller.currentEpisodeTitle
+        )
+    }
+
+    fun setIsRandom(random: Boolean) {
+        controller.setIsRandom(random)
+    }
+
     val uiState: StateFlow<PlayerUiState>
         get() = controller.uiState
 

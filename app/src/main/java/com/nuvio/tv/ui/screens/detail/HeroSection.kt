@@ -70,12 +70,16 @@ import com.nuvio.tv.ui.theme.NuvioColors
 import com.nuvio.tv.ui.theme.NuvioTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.painter.Painter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import coil.decode.SvgDecoder
+import coil.request.ImageRequest
+import com.nuvio.tv.ui.screens.player.PlayerNextEpisodeRules
 import java.util.Locale
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -86,6 +90,8 @@ fun HeroContentSection(
     nextToWatch: NextToWatch?,
     onPlayClick: () -> Unit,
     onPlayLongPress: (() -> Unit)? = null,
+    onRandomEpisodeClick: ((Video) -> Unit)? = null,
+    onRandomEpisodeLongPress: ((Video) -> Unit)? = null,
     isInLibrary: Boolean,
     onToggleLibrary: () -> Unit,
     onLibraryLongPress: () -> Unit,
@@ -93,6 +99,7 @@ fun HeroContentSection(
     isMovieWatchedPending: Boolean,
     onToggleMovieWatched: () -> Unit,
     trailerAvailable: Boolean = false,
+    randomAvailable: Boolean = false,
     onTrailerClick: () -> Unit = {},
     hideLogoDuringTrailer: Boolean = false,
     mdbListRatings: MDBListRatings? = null,
@@ -130,6 +137,15 @@ fun HeroContentSection(
         context = context,
         rawRes = com.nuvio.tv.R.raw.trailer_play_button
     )
+    val randomEpisode = remember(meta.videos) {
+        meta.videos
+            .filter { video ->
+                video.season != null && video.season > 0 &&
+                        video.episode != null && video.episode > 0 &&
+                        PlayerNextEpisodeRules.hasEpisodeAired(video.released)
+            }
+            .randomOrNull()
+    }
     val strCreator = stringResource(R.string.hero_creator)
     val strDirector = stringResource(R.string.hero_director)
     val strWriter = stringResource(R.string.hero_writer)
@@ -276,6 +292,20 @@ fun HeroContentSection(
                                 selected = isMovieWatched,
                                 selectedContainerColor = Color.White,
                                 selectedContentColor = Color.Black,
+                                onFocused = onHeroActionFocused
+                            )
+                        }
+
+                        if (randomAvailable && randomEpisode != null && onRandomEpisodeClick != null && isSeriesApi) {
+                            ActionIconButton(
+                                icon = Icons.Default.Shuffle,
+                                contentDescription = "Play random episode",
+                                onClick = {
+                                    onRandomEpisodeClick(randomEpisode)
+                                },
+                                onLongPress = {
+                                    onRandomEpisodeLongPress?.invoke(randomEpisode)
+                                },
                                 onFocused = onHeroActionFocused
                             )
                         }

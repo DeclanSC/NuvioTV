@@ -229,6 +229,38 @@ fun MetaDetailsScreen(
         year: String?,
         runtime: Int?,
         contentLanguage: String?
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    onRandomPlayClick: (
+        videoId: String,
+        contentType: String,
+        contentId: String,
+        title: String,
+        poster: String?,
+        backdrop: String?,
+        logo: String?,
+        season: Int?,
+        episode: Int?,
+        episodeName: String?,
+        genres: String?,
+        year: String?,
+        runtime: Int?,
+        isRandom: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    onRandomManualPlayClick: (
+        videoId: String,
+        contentType: String,
+        contentId: String,
+        title: String,
+        poster: String?,
+        backdrop: String?,
+        logo: String?,
+        season: Int?,
+        episode: Int?,
+        episodeName: String?,
+        genres: String?,
+        year: String?,
+        runtime: Int?,
+        isRandom: Boolean
     ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -531,6 +563,42 @@ fun MetaDetailsScreen(
                             meta.resolveContentLanguage()
                         )
                     },
+                    onRandomPlayClick = { video ->
+                        onRandomPlayClick(
+                            video.id,
+                            meta.apiType,
+                            meta.id,
+                            meta.name,
+                            video.thumbnail ?: meta.poster,
+                            meta.backdropUrl,
+                            meta.logo,
+                            video.season,
+                            video.episode,
+                            video.title,
+                            null,
+                            null,
+                            video.runtime,
+                            true
+                        )
+                    },
+                    onRandomManualPlayClick = { video ->
+                        onRandomManualPlayClick(
+                            video.id,
+                            meta.apiType,
+                            meta.id,
+                            meta.name,
+                            video.thumbnail ?: meta.poster,
+                            meta.backdropUrl,
+                            meta.logo,
+                            video.season,
+                            video.episode,
+                            video.title,
+                            null,
+                            null,
+                            video.runtime,
+                            true
+                        )
+                    },
                     showManualPlayOption = effectiveAutoplayEnabled,
                     onPlayButtonFocused = { viewModel.onEvent(MetaDetailsEvent.OnPlayButtonFocused) },
                     onToggleLibrary = { viewModel.onEvent(MetaDetailsEvent.OnToggleLibrary) },
@@ -564,6 +632,7 @@ fun MetaDetailsScreen(
                     sharedTrailerAudioUrl = uiState.sharedTrailerAudioUrl,
                     sharedTrailerErrorMessage = uiState.sharedTrailerErrorMessage,
                     selectedSharedTrailer = uiState.selectedSharedTrailer,
+                    randomButtonEnabled = uiState.randomButtonEnabled,
                     trailerSeekToken = trailerSeekToken,
                     trailerSeekDeltaMs = trailerSeekDeltaMs,
                     onTrailerControlKey = { keyCode, action, repeatCount ->
@@ -777,6 +846,8 @@ private fun MetaDetailsContent(
     onEpisodeManualPlayClick: (Video) -> Unit,
     onPlayClick: (String) -> Unit,
     onPlayManuallyClick: (String) -> Unit,
+    onRandomPlayClick: (Video) -> Unit,
+    onRandomManualPlayClick: (Video) -> Unit,
     showManualPlayOption: Boolean,
     onPlayButtonFocused: () -> Unit,
     onToggleLibrary: () -> Unit,
@@ -800,6 +871,7 @@ private fun MetaDetailsContent(
     sharedTrailerAudioUrl: String?,
     sharedTrailerErrorMessage: String?,
     selectedSharedTrailer: MetaTrailer?,
+    randomButtonEnabled: Boolean,
     trailerSeekToken: Int,
     trailerSeekDeltaMs: Long,
     onTrailerControlKey: (keyCode: Int, action: Int, repeatCount: Int) -> Boolean,
@@ -836,6 +908,7 @@ private fun MetaDetailsContent(
         meta.videos.firstOrNull { it.id == defaultVideoId && it.available != false }
     }
     val nextEpisode = remember(episodesForSeason) { episodesForSeason.firstOrNull() }
+    var manualPlayIsRandom by remember { mutableStateOf(false) }
     val heroVideo = remember(meta.videos, nextToWatch, nextEpisode, defaultSeriesVideo, isSeries) {
         if (!isSeries) return@remember null
         val byId = nextToWatch?.nextVideoId?.let { id ->
@@ -887,6 +960,7 @@ private fun MetaDetailsContent(
     var companyRestoreToken by rememberSaveable { mutableIntStateOf(0) }
     var initialHeroFocusRequested by rememberSaveable(meta.id) { mutableStateOf(false) }
     var showHeroPlayOptionsDialog by rememberSaveable(meta.id) { mutableStateOf(false) }
+    var manualPlayEpisode by remember { mutableStateOf<Video?>(null) }
     var initialDetailReturnFocusHandled by rememberSaveable(
         meta.id,
         detailReturnEpisodeFocusRequest?.season,
@@ -1263,6 +1337,13 @@ private fun MetaDetailsContent(
         }
     }
 
+    val heroPlayEpisodeClick: (Video) -> Unit = remember(onEpisodeClick) {
+        { episode ->
+            markHeroRestore()
+            onEpisodeClick(episode)
+        }
+    }
+
     val episodeClick = remember(onEpisodeClick) {
         { video: Video ->
             markEpisodeRestore(video.id)
@@ -1463,9 +1544,18 @@ private fun MetaDetailsContent(
                         nextToWatch = nextToWatch,
                         onPlayClick = heroPlayClick,
                         onPlayLongPress = if (showManualPlayOption) {
-                            { showHeroPlayOptionsDialog = true }
-                        } else {
-                            null
+                            {
+                                manualPlayEpisode = heroVideo   // normal behavior
+                                showHeroPlayOptionsDialog = true
+                            }
+                        } else null,
+                        onRandomEpisodeClick = { episode ->
+                            onRandomPlayClick(episode)
+                        },
+                        onRandomEpisodeLongPress = { episode ->
+                            manualPlayEpisode = episode
+                            manualPlayIsRandom = true
+                            showHeroPlayOptionsDialog = true
                         },
                         isInLibrary = isInLibrary,
                         onToggleLibrary = onToggleLibrary,
@@ -1478,6 +1568,7 @@ private fun MetaDetailsContent(
                         tmdbRating = if (mdbListRatings?.isEmpty() != false) tmdbRating else null,
                         showFullReleaseDate = showFullReleaseDate,
                         trailerAvailable = trailerButtonEnabled && !trailerUrl.isNullOrBlank(),
+                        randomAvailable = randomButtonEnabled,
                         onTrailerClick = onTrailerButtonClick,
                         hideLogoDuringTrailer = hideLogoDuringTrailer,
                         isTrailerPlaying = isTrailerPlaying,
@@ -1711,7 +1802,7 @@ private fun MetaDetailsContent(
                     }
                 }
             }
-            
+
             // Collection as separate section when there are too many tabs
             if (shouldSplitCollection && collection.isNotEmpty()) {
                 item(key = "collection_section", contentType = "horizontal_row") {
@@ -1856,14 +1947,37 @@ private fun MetaDetailsContent(
         if (showHeroPlayOptionsDialog) {
             PlayManualOverrideDialog(
                 title = meta.name,
-                subtitle = nextToWatch?.displayText ?: stringResource(R.string.hero_play),
-                onDismiss = { showHeroPlayOptionsDialog = false },
+                subtitle = manualPlayEpisode?.let { episode ->
+                    stringResource(
+                        R.string.hero_play_episode,
+                        episode.season ?: 0,
+                        episode.episode ?: 0
+                    )
+                } ?: nextToWatch?.displayText ?: stringResource(R.string.hero_play),
+                onDismiss = {
+                    showHeroPlayOptionsDialog = false
+                    manualPlayIsRandom = false
+                    manualPlayEpisode = null
+                },
                 onPlayManually = {
                     showHeroPlayOptionsDialog = false
-                    heroPlayManualClick()
+                    val episode = manualPlayEpisode
+                    if (episode != null) {
+                        if (manualPlayIsRandom) {
+                            onRandomManualPlayClick(episode)
+                        } else {
+                            onEpisodeManualPlayClick(episode)
+                        }
+                    } else {
+                        // Movie case (non‑series) – only occurs when manualPlayIsRandom is false
+                        heroPlayManualClick()
+                    }
+                    manualPlayEpisode = null
+                    manualPlayIsRandom = false
                 }
             )
         }
+
 
         selectedComment?.let { review ->
             CommentOverlay(

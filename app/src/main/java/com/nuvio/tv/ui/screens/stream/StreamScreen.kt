@@ -109,7 +109,8 @@ fun StreamScreen(
     viewModel: StreamScreenViewModel = hiltViewModel(),
     onBackPress: () -> Unit,
     onStreamSelected: (StreamPlaybackInfo) -> Unit,
-    onAutoPlayResolved: (StreamPlaybackInfo) -> Unit
+    onAutoPlayResolved: (StreamPlaybackInfo) -> Unit,
+    isRandom: Boolean
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val playerPreference by viewModel.playerPreference.collectAsStateWithLifecycle(
