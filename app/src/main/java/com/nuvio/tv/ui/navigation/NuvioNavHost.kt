@@ -883,7 +883,8 @@ fun NuvioNavHost(
                             contentName = args?.getString("contentName"),
                             runtime = null,
                             returnToDetailOnBack = returnToDetailOnBack,
-                            returnToHomeOnBack = returnToHomeOnBack
+                            returnToHomeOnBack = returnToHomeOnBack,
+                            isRandom = isRandom
                         )
                         navController.navigate(route) {
                             popUpTo(Screen.Player.route) { inclusive = true }
@@ -891,7 +892,17 @@ fun NuvioNavHost(
                     } else {
                         // No next episode — pop back to detail (or home if detail not on stack)
                         val poppedToDetail = navController.popBackStack(Screen.Detail.route, inclusive = false)
-                        if (!poppedToDetail) {
+                        if (poppedToDetail) {
+                            if (isRandom) {
+                                navController.currentBackStackEntry
+                                    ?.savedStateHandle
+                                    ?.remove<Int>("returnFocusSeason")
+
+                                navController.currentBackStackEntry
+                                    ?.savedStateHandle
+                                    ?.remove<Int>("returnFocusEpisode")
+                            }
+                        } else {
                             navController.popBackStack(Screen.Stream.route, inclusive = true)
                         }
                     }
