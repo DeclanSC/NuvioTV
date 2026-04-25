@@ -77,8 +77,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.painter.Painter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import coil.decode.SvgDecoder
-import coil.request.ImageRequest
 import com.nuvio.tv.ui.screens.player.PlayerNextEpisodeRules
 import java.util.Locale
 

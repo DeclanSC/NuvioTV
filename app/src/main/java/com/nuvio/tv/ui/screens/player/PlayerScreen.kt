@@ -128,7 +128,7 @@ import kotlinx.coroutines.delay
 fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel(),
     onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean) -> Unit,
-    onPlaybackErrorBack: (videoId: String, season: Int?, episode: Int?, episodeTitle: String?) -> Unit = { _, _, _, _ -> onBackPress(null, null, null, false) },
+    onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false) },
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?) -> Unit)? = null,
     isRandom: Boolean
 ) {
@@ -154,8 +154,7 @@ fun PlayerScreen(
     }
     val exitPlayerFromError: () -> Unit = {
         viewModel.stopAndRelease()
-        val info = viewModel.getCurrentEpisodeInfo()
-        onPlaybackErrorBack(info.videoId, info.season, info.episode, info.episodeTitle)
+        onPlaybackErrorBack()
     }
 
     val handleBackPress = {
@@ -678,10 +677,7 @@ fun PlayerScreen(
         if (uiState.error != null) {
             ErrorOverlay(
                 message = uiState.error!!,
-                onBack = {
-                    val info = viewModel.getCurrentEpisodeInfo()
-                    onPlaybackErrorBack(info.videoId, info.season, info.episode, info.episodeTitle)
-                }
+                onBack = exitPlayerFromError
             )
         }
 
