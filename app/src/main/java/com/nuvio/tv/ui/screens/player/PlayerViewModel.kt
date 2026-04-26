@@ -142,6 +142,10 @@ class PlayerViewModel @Inject constructor(
         controller.pauseForLifecycle()
     }
 
+    fun resumeForLifecycle() {
+        controller.resumeForLifecycle()
+    }
+
     fun startInitialPlaybackIfNeeded() {
         controller.startInitialPlaybackIfNeeded()
     }
