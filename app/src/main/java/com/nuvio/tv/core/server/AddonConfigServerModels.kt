@@ -52,6 +52,7 @@ data class FolderInfo(
     val tileShape: String,
     val hideTitle: Boolean,
     val heroBackdropUrl: String? = null,
+    val heroVideoUrl: String? = null,
     val titleLogoUrl: String? = null,
     val catalogSources: List<CatalogSourceInfo> = emptyList(),
     val sources: List<CollectionSourceInfo> = catalogSources.map { it.toCollectionSourceInfo() }
@@ -119,7 +120,8 @@ data class PageState(
     val addons: List<AddonInfo>,
     val catalogs: List<CatalogInfo>,
     val collections: List<CollectionInfo> = emptyList(),
-    val disabledCollectionKeys: List<String> = emptyList()
+    val disabledCollectionKeys: List<String> = emptyList(),
+    val followAddonsOrder: Boolean = false
 )
 
 data class PendingAddonChange(
@@ -129,6 +131,7 @@ data class PendingAddonChange(
     val proposedDisabledCatalogKeys: List<String> = emptyList(),
     val proposedCollectionsJson: String? = null,
     val proposedDisabledCollectionKeys: List<String> = emptyList(),
+    val proposedFollowAddonsOrder: Boolean? = null,
     var status: AddonChangeStatus = AddonChangeStatus.PENDING
 )
 

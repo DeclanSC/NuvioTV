@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import java.util.Locale
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDp
@@ -158,6 +159,8 @@ data class DrawerItem(
 private data class MainUiPrefs(
     val theme: AppTheme = AppTheme.WHITE,
     val font: AppFont = AppFont.INTER,
+    val amoledMode: Boolean = false,
+    val amoledSurfacesMode: Boolean = false,
     val hasChosenLayout: Boolean? = null,
     val sidebarCollapsed: Boolean = false,
     val modernSidebarEnabled: Boolean = false,
@@ -307,6 +310,10 @@ class MainActivity : ComponentActivity() {
                         sidebarCollapsed = sidebarCollapsed,
                         modernSidebarEnabled = modernSidebarEnabled,
                     )
+                }.combine(themeDataStore.amoledMode) { prefs, amoledMode ->
+                    prefs.copy(amoledMode = amoledMode)
+                }.combine(themeDataStore.amoledSurfacesMode) { prefs, amoledSurfacesMode ->
+                    prefs.copy(amoledSurfacesMode = amoledSurfacesMode)
                 }.combine(layoutPreferenceDataStore.modernSidebarBlurEnabled) { prefs, modernSidebarBlurPref ->
                     prefs.copy(modernSidebarBlurPref = modernSidebarBlurPref)
                 }.combine(layoutPreferenceDataStore.smoothBringIntoViewEnabled) { prefs, smoothBringIntoViewEnabled ->
@@ -317,7 +324,12 @@ class MainActivity : ComponentActivity() {
             }
             val mainUiPrefs by mainUiPrefsFlow.collectAsState(initial = MainUiPrefs(hasChosenLayout = null))
 
-            NuvioTheme(appTheme = mainUiPrefs.theme, appFont = mainUiPrefs.font) {
+            NuvioTheme(
+                appTheme = mainUiPrefs.theme,
+                appFont = mainUiPrefs.font,
+                amoledMode = mainUiPrefs.amoledMode,
+                amoledSurfacesMode = mainUiPrefs.amoledSurfacesMode
+            ) {
                 val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
                 val bringIntoViewSpec = if (mainUiPrefs.smoothBringIntoViewEnabled) {
                     NuvioScrollDefaults.smoothScrollSpec
@@ -623,6 +635,7 @@ private fun LegacySidebarScaffold(
 
     val closedDrawerWidth = if (sidebarCollapsed) 0.dp else 72.dp
     val openDrawerWidth = 196.dp
+    val openDrawerItemWidth = 148.dp
 
     val focusManager = LocalFocusManager.current
     val isRtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
@@ -670,7 +683,7 @@ private fun LegacySidebarScaffold(
         drawerContent = { drawerValue ->
             if (showSidebar) {
                 val drawerWidth = if (drawerValue == DrawerValue.Open) openDrawerWidth else closedDrawerWidth
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxHeight()
                         .width(drawerWidth)
@@ -689,73 +702,80 @@ private fun LegacySidebarScaffold(
                         }
                 ) {
                     val isExpanded = drawerValue == DrawerValue.Open
-                    val itemWidth = if (isExpanded) 156.dp else 48.dp
+                    val itemWidth = if (isExpanded) openDrawerItemWidth else 48.dp
 
                     if (isExpanded) {
-                        Spacer(modifier = Modifier.height(30.dp))
-                        if (showProfileSelector && activeProfileName.isNotEmpty()) {
-                            var isProfileFocused by remember { mutableStateOf(false) }
-                            val profileItemShape = RoundedCornerShape(32.dp)
-                            val profileLeadingInset = 18.dp
-                            val profileAvatarSize = 34.dp
-                            val profileLabelStart = 60.dp
-                            val profileGapAfterAvatar =
-                                (profileLabelStart - profileLeadingInset - profileAvatarSize).coerceAtLeast(0.dp)
-                            val profileBgColor by animateColorAsState(
-                                targetValue = if (isProfileFocused) NuvioColors.FocusBackground else Color.Transparent,
-                                label = "legacyProfileItemBg"
-                            )
-                            Box(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .width(itemWidth)
-                                        .height(52.dp)
-                                        .background(color = profileBgColor, shape = profileItemShape)
-                                        .onFocusChanged { isProfileFocused = it.isFocused }
-                                        .clickable {
-                                            onSwitchProfile()
-                                            drawerState.setValue(DrawerValue.Closed)
-                                        },
-                                    verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth()
+                        ) {
+                            Spacer(modifier = Modifier.height(30.dp))
+                            if (showProfileSelector && activeProfileName.isNotEmpty()) {
+                                var isProfileFocused by remember { mutableStateOf(false) }
+                                val profileItemShape = RoundedCornerShape(32.dp)
+                                val profileLeadingInset = 18.dp
+                                val profileAvatarSize = 34.dp
+                                val profileLabelStart = 60.dp
+                                val profileGapAfterAvatar =
+                                    (profileLabelStart - profileLeadingInset - profileAvatarSize).coerceAtLeast(0.dp)
+                                val profileBgColor by animateColorAsState(
+                                    targetValue = if (isProfileFocused) NuvioColors.FocusBackground else Color.Transparent,
+                                    label = "legacyProfileItemBg"
+                                )
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Spacer(modifier = Modifier.width(profileLeadingInset))
-                                    ProfileAvatarCircle(
-                                        name = activeProfileName,
-                                        colorHex = activeProfileColorHex,
-                                        size = profileAvatarSize,
-                                        avatarImageUrl = activeProfileAvatarImageUrl
-                                    )
-                                    Spacer(modifier = Modifier.width(profileGapAfterAvatar))
-                                    Text(
-                                        text = activeProfileName,
-                                        color = if (isProfileFocused) NuvioColors.TextPrimary else NuvioColors.TextSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Start,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .width(itemWidth)
+                                            .height(52.dp)
+                                            .background(color = profileBgColor, shape = profileItemShape)
+                                            .onFocusChanged { isProfileFocused = it.isFocused }
+                                            .clickable {
+                                                onSwitchProfile()
+                                                drawerState.setValue(DrawerValue.Closed)
+                                            },
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Spacer(modifier = Modifier.width(profileLeadingInset))
+                                        ProfileAvatarCircle(
+                                            name = activeProfileName,
+                                            colorHex = activeProfileColorHex,
+                                            size = profileAvatarSize,
+                                            avatarImageUrl = activeProfileAvatarImageUrl
+                                        )
+                                        Spacer(modifier = Modifier.width(profileGapAfterAvatar))
+                                        Text(
+                                            text = activeProfileName,
+                                            color = if (isProfileFocused) NuvioColors.TextPrimary else NuvioColors.TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Start,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
+                            } else {
+                                Image(
+                                    painter = painterResource(id = R.drawable.app_logo_wordmark),
+                                    contentDescription = "NuvioTV",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(42.dp)
+                                )
                             }
-                        } else {
-                            Image(
-                                painter = painterResource(id = R.drawable.app_logo_wordmark),
-                                contentDescription = "NuvioTV",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(42.dp)
-                            )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    Spacer(modifier = Modifier.weight(1f))
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .offset(y = 28.dp)
+                            .fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = if (isExpanded) Alignment.CenterHorizontally else Alignment.Start
                     ) {
                         drawerItems.forEach { item ->
                             LegacySidebarButton(
@@ -780,8 +800,6 @@ private fun LegacySidebarScaffold(
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -896,7 +914,7 @@ private fun LegacySidebarButton(
                 Modifier
                     .size(22.dp)
                     .align(Alignment.CenterStart)
-                    .offset(x = 18.dp)
+                    .offset(x = 13.dp)
             } else {
                 Modifier
                     .size(22.dp)
@@ -1019,14 +1037,17 @@ private fun ModernSidebarScaffold(
         },
         label = "sidebarWidth"
     )
+    val animationDuration = if (sidebarVisible) 400 else 300
+    val animationEasing = if (sidebarVisible) FastOutSlowInEasing else FastOutLinearInEasing
+
     val sidebarSlideX by animateDpAsState(
         targetValue = if (sidebarVisible) 0.dp else (-24).dp,
-        animationSpec = tween(durationMillis = 205, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = animationDuration, easing = animationEasing),
         label = "sidebarSlideX"
     )
     val sidebarSurfaceAlpha by animateFloatAsState(
         targetValue = if (sidebarVisible) 1f else 0f,
-        animationSpec = tween(durationMillis = 135, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = animationDuration, easing = animationEasing),
         label = "sidebarSurfaceAlpha"
     )
     val shouldApplySidebarHaze = showSidebar && modernSidebarBlurEnabled && (

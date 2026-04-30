@@ -258,6 +258,10 @@
     <string name="appearance_subtitle">Choose your color theme, font and language</string>
     <string name="appearance_color_theme">Color Theme</string>
     <string name="appearance_color_theme_subtitle">Pick the accent color used across the app</string>
+    <string name="appearance_amoled_mode">AMOLED Mode</string>
+    <string name="appearance_amoled_mode_subtitle">Use pure black for app backgrounds</string>
+    <string name="appearance_amoled_surfaces_mode">Pure Black Surfaces</string>
+    <string name="appearance_amoled_surfaces_mode_subtitle">Also make cards, panels, and containers pure black</string>
     <string name="appearance_font_and_language">Font and Language</string>
     <string name="appearance_font_and_language_subtitle">Choose the typeface and locale used throughout the app</string>
     <string name="cd_selected">Selected</string>
@@ -356,12 +360,19 @@
     <string name="supporters_contributors_qr_hint">Point your camera at the QR code or use the button below.</string>
     <string name="supporters_contributors_back_button">Back to details</string>
     <string name="supporters_tab">Supporters</string>
+    <string name="sponsors_tab">Sponsors</string>
     <string name="contributors_tab">Contributors</string>
     <string name="supporters_loading">Loading supporters…</string>
     <string name="supporters_empty">No supporters found yet.</string>
     <string name="supporters_error_title">Couldn’t load supporters</string>
     <string name="supporters_no_message">No message shared.</string>
     <string name="supporters_open_donations">Open donations page</string>
+    <string name="sponsors_loading">Loading sponsors…</string>
+    <string name="sponsors_empty">No sponsors found yet.</string>
+    <string name="sponsors_error_title">Couldn’t load sponsors</string>
+    <string name="sponsors_detail_copy">Sponsors help move Nuvio forward through support across the different parts of development.</string>
+    <string name="sponsors_channel_unavailable">Sponsor channel unavailable.</string>
+    <string name="sponsors_open_channel">Open sponsor channel</string>
     <string name="contributors_loading">Loading GitHub contributors…</string>
     <string name="contributors_empty">No contributors found yet.</string>
     <string name="contributors_error_title">Couldn’t load contributors</string>
@@ -436,6 +447,8 @@
     <string name="audio_preferred_lang">Preferred Audio Language</string>
     <string name="audio_skip_silence">Skip Silence</string>
     <string name="audio_skip_silence_sub">Skip silent portions of audio during playback</string>
+    <string name="audio_remember_delay_per_device">Remember audio delay per device</string>
+    <string name="audio_remember_delay_per_device_sub">Save and restore the in-player audio delay for the current audio output route</string>
     <string name="audio_advanced_section">Advanced Audio</string>
     <string name="audio_advanced_warning">These settings may cause issues on some devices. Change only if you know what you\'re doing.</string>
     <string name="audio_decoder_device_only">Device decoders only</string>
@@ -578,6 +591,8 @@
     <string name="layout_modern_sidebar_blur_sub">Toggle blur effect for modern sidebar surfaces.</string>
     <string name="layout_fullscreen_hero_backdrop">Fullscreen Hero Backdrop</string>
     <string name="layout_fullscreen_hero_backdrop_sub">Expand the hero backdrop to fill the entire screen.</string>
+    <string name="layout_classic_focus_gradient">Focused Item Gradient</string>
+    <string name="layout_classic_focus_gradient_sub">Blend artwork colors into the right side of Classic home.</string>
     <string name="layout_show_hero">Show Hero Section</string>
     <string name="layout_show_hero_sub">Display hero carousel at top of home.</string>
     <string name="layout_show_discover">Show Discover in Search</string>
@@ -924,6 +939,8 @@
     <!-- CatalogOrderScreen -->
     <string name="catalog_order_title">Reorder Home Catalogs</string>
     <string name="catalog_order_subtitle">This controls catalog row order on Home (Classic + Modern + Grid).</string>
+    <string name="catalog_order_follow_addons">Follow addons order</string>
+    <string name="catalog_order_follow_addons_desc">Catalogs follow addon manifest order. Collections can still be moved between addons.</string>
     <string name="catalog_order_empty">No home catalogs available yet.</string>
     <string name="catalog_order_disabled_on_home">Disabled on Home</string>
     <string name="catalog_order_enable">Enable</string>
@@ -1043,6 +1060,8 @@
     <string name="audio_dialog_title">Audio</string>
     <string name="audio_dialog_tab_tracks">Audio</string>
     <string name="audio_dialog_tab_mix">Mix</string>
+    <string name="audio_delay_label">Audio Delay</string>
+    <string name="audio_delay_range">Range: %1$.2fs to %2$.2fs</string>
     <string name="audio_mix_label">Amplification (PCM)</string>
     <string name="audio_mix_value_db">%1$d dB</string>
     <string name="audio_mix_persist_on">Persist between sessions: ON</string>
@@ -1636,6 +1655,8 @@
     <string name="collections_editor_placeholder_gif">Animated GIF URL (plays only while focused)</string>
     <string name="collections_editor_hero_backdrop">Hero Backdrop (Modern Home)</string>
     <string name="collections_editor_placeholder_hero_backdrop">Custom hero backdrop URL (optional)</string>
+    <string name="collections_editor_hero_video">Hero Video (Modern Home)</string>
+    <string name="collections_editor_placeholder_hero_video">Custom hero video URL (optional)</string>
     <string name="collections_editor_title_logo">Title Logo (Modern Home)</string>
     <string name="collections_editor_placeholder_title_logo">Custom title logo URL (optional)</string>
     <string name="collections_editor_genre_filter">Genre Filter</string>
