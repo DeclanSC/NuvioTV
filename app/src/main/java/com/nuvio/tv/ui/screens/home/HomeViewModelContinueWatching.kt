@@ -49,13 +49,21 @@ private const val CW_MAX_NEXT_UP_CONCURRENCY = 4
 private const val CW_MAX_ENRICHMENT_CONCURRENCY = 4
 private const val CW_PROGRESS_DEBOUNCE_MS = 500L
 
+private data class ProgressSnapshot(
+    val items: List<WatchProgress>,
+    val nextUpSeeds: List<WatchProgress>,
+    val hasLoadedRemoteProgress: Boolean
+)
+
 private data class ContinueWatchingSettingsSnapshot(
     val items: List<WatchProgress>,
     val nextUpSeeds: List<WatchProgress>,
     val daysCap: Int,
     val dismissedNextUp: Set<String>,
     val showUnairedNextUp: Boolean,
-    val watchedItemsVersion: Int  // triggers re-evaluation when watched items change
+    val nextUpFromFurthestEpisode: Boolean,
+    val watchedItemsVersion: Int,  // triggers re-evaluation when watched items change
+    val hasLoadedRemoteProgress: Boolean
 )
 
 /**
@@ -241,33 +249,42 @@ private class CwDebugSession {
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 internal fun HomeViewModel.loadContinueWatchingPipeline() {
-    viewModelScope.launch {
+    cwPipelineJob?.cancel()
+    cwPipelineJob = viewModelScope.launch {
         combine(
             combine(
                 watchProgressRepository.allProgress,
-                watchProgressRepository.observeNextUpSeeds()
-            ) { items, nextUpSeeds ->
-                items to nextUpSeeds
+                watchProgressRepository.observeNextUpSeeds(),
+                watchProgressRepository.observeRemoteProgressLoaded()
+            ) { items, nextUpSeeds, hasLoaded ->
+                ProgressSnapshot(items, nextUpSeeds, hasLoaded)
             },
             combine(
                 traktSettingsDataStore.continueWatchingDaysCap,
                 traktSettingsDataStore.dismissedNextUpKeys,
-                traktSettingsDataStore.showUnairedNextUp
-            ) { daysCap, dismissedNextUp, showUnairedNextUp ->
-                Triple(daysCap, dismissedNextUp, showUnairedNextUp)
+                layoutPreferenceDataStore.showUnairedNextUp,
+                layoutPreferenceDataStore.nextUpFromFurthestEpisode
+            ) { daysCap, dismissedNextUp, showUnairedNextUp, nextUpFromFurthest ->
+                arrayOf(daysCap, dismissedNextUp, showUnairedNextUp, nextUpFromFurthest)
             },
             watchedItemsPreferences.allItems.map { it.size },
             cwPipelineRefreshTrigger
         ) { progressSnapshot, settingsSnapshot, watchedItemsSize, _ ->
-            val (items, nextUpSeeds) = progressSnapshot
-            val (daysCap, dismissedNextUp, showUnairedNextUp) = settingsSnapshot
+            val (items, nextUpSeeds, hasLoadedRemoteProgress) = progressSnapshot
+            @Suppress("UNCHECKED_CAST")
+            val daysCap = settingsSnapshot[0] as Int
+            val dismissedNextUp = settingsSnapshot[1] as Set<String>
+            val showUnairedNextUp = settingsSnapshot[2] as Boolean
+            val nextUpFromFurthestEpisode = settingsSnapshot[3] as Boolean
             ContinueWatchingSettingsSnapshot(
                 items = items,
                 nextUpSeeds = nextUpSeeds,
                 daysCap = daysCap,
                 dismissedNextUp = dismissedNextUp,
                 showUnairedNextUp = showUnairedNextUp,
-                watchedItemsVersion = watchedItemsSize
+                nextUpFromFurthestEpisode = nextUpFromFurthestEpisode,
+                watchedItemsVersion = watchedItemsSize,
+                hasLoadedRemoteProgress = hasLoadedRemoteProgress
             )
         }.debounce(CW_PROGRESS_DEBOUNCE_MS).collectLatest { snapshot ->
             val debug = CwDebugSession()
@@ -280,6 +297,7 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                 val daysCap = snapshot.daysCap
                 val dismissedNextUp = snapshot.dismissedNextUp
                 val showUnairedNextUp = snapshot.showUnairedNextUp
+                val nextUpFromFurthestEpisode = snapshot.nextUpFromFurthestEpisode
                 val cutoffMs = if (daysCap == TraktSettingsDataStore.CONTINUE_WATCHING_DAYS_CAP_ALL) {
                     null
                 } else {
@@ -303,17 +321,11 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                 // have been fully unmarked as watched.
                 val activeSeedContentIds = nextUpSeeds
                     .mapTo(mutableSetOf()) { it.contentId }
-                // When Trakt seeds haven't loaded yet (empty seeds + empty items),
-                // we can't tell which shows were truly unmarked vs simply not
-                // fetched yet. Skip the seed-based eviction so cached next-up
-                // items survive until real data arrives.
-                val seedsNotYetLoaded = useTraktProgress && activeSeedContentIds.isEmpty() && items.isEmpty()
-
                 // Evict in-memory next-up caches for series that lost all seeds
                 // (e.g. user unmarked all episodes as watched).
                 // Skip eviction when seeds haven't loaded yet to avoid wiping
                 // valid cached items before Trakt responds.
-                if (!seedsNotYetLoaded) {
+                if (snapshot.hasLoadedRemoteProgress) {
                     synchronized(discoveredOlderNextUpItems) {
                         discoveredOlderNextUpItems.removeAll { it.info.contentId !in activeSeedContentIds }
                     }
@@ -440,6 +452,9 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
 
                 debug.markPhase("render-in-progress")
                 // Render in-progress items + cached next-up immediately
+                val currentSeedByContentId = nextUpSeeds
+                    .filter { it.season != null && it.episode != null }
+                    .associateBy({ it.contentId }, { (it.season!! to it.episode!!) })
                 val cachedNextUpItems = cachedNextUp.mapNotNull { cached ->
                     // Skip if this show is already in-progress (suppression)
                     if (inProgressOnly.any { it.progress.contentId == cached.contentId }) return@mapNotNull null
@@ -449,7 +464,14 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                     if (!cached.hasAired && !showUnairedNextUp) return@mapNotNull null
                     // Drop if the series no longer has any watched-episode seeds
                     // (e.g. user unmarked all episodes as watched).
-                    if (!seedsNotYetLoaded && cached.contentId !in activeSeedContentIds) return@mapNotNull null
+                    if (!snapshot.hasLoadedRemoteProgress && cached.contentId !in activeSeedContentIds) return@mapNotNull null
+                    val currentSeed = currentSeedByContentId[cached.contentId]
+                    if (currentSeed != null && cached.seedSeason != null && cached.seedEpisode != null) {
+                        val (curSeason, curEpisode) = currentSeed
+                        val seedAdvanced = curSeason > cached.seedSeason ||
+                            (curSeason == cached.seedSeason && curEpisode > cached.seedEpisode)
+                        if (seedAdvanced) return@mapNotNull null
+                    }
                     ContinueWatchingItem.NextUp(
                         info = NextUpInfo(
                             contentId = cached.contentId,
@@ -534,6 +556,7 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                     inProgressItems = inProgressOnly,
                     dismissedNextUp = dismissedNextUp,
                     showUnairedNextUp = showUnairedNextUp,
+                    nextUpFromFurthestEpisode = nextUpFromFurthestEpisode,
                     debug = debug,
                     onPartialUpdate = { partialNextUpItems ->
                         partialPublishMutex.withLock {
@@ -733,7 +756,7 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                             }
                         val uncachedSeeds = (seedsFromNextUp + seedsFromWatchedItems)
                             .groupBy { it.contentId }
-                            .mapNotNull { (_, items) -> choosePreferredNextUpSeed(items) }
+                            .mapNotNull { (_, items) -> choosePreferredNextUpSeed(items, nextUpFromFurthestEpisode) }
                         if (uncachedSeeds.isNotEmpty()) {
                             launch(Dispatchers.IO) {
                                 // Process sequentially with yielding to avoid CPU/GC spikes.
@@ -889,10 +912,9 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                     discoveredOlderNextUpItems.toList()
                 }
                 // Preserve cached next-up items from disk until async inject re-verifies them.
-                // Drop items whose series no longer has any watched-episode seeds.
-                // When seeds haven't loaded yet, keep all cached items.
+                // Drop items whose series no longer has any watched-episode seeds (only if seeds have loaded).
                 val cachedOlderNextUp = cachedNextUp
-                    .filter { seedsNotYetLoaded || it.contentId in activeSeedContentIds }
+                    .filter { !snapshot.hasLoadedRemoteProgress || it.contentId in activeSeedContentIds }
                     .map { cached ->
                         ContinueWatchingItem.NextUp(
                             info = NextUpInfo(
@@ -936,7 +958,7 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                     .filter {
                         val isCachedFromDisk = cachedOlderNextUp.any { c -> c.info.contentId == it.info.contentId }
                         val pass =
-                            (seedsNotYetLoaded || it.info.contentId in activeSeedContentIds || isCachedFromDisk) &&
+                            (!snapshot.hasLoadedRemoteProgress || it.info.contentId in activeSeedContentIds || isCachedFromDisk) &&
                             it.info.contentId !in recentIds &&
                             it.info.contentId !in inProgressIds &&
                             // Reject items the fresh pipeline evaluated but produced no
@@ -954,6 +976,7 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                 val freshContentIds = allNextUpItems.map { it.info.contentId }.toSet()
                 val retainedFromCache = cachedNextUpItems.filter {
                     it.info.contentId !in freshContentIds &&
+                        it.info.contentId !in rejectedByFreshPipeline &&
                         nextUpDismissKey(it.info.contentId, it.info.seedSeason, it.info.seedEpisode) !in dismissedNextUp
                 }
                 val finalNextUpItems = allNextUpItems + retainedFromCache
@@ -1157,18 +1180,26 @@ private fun isMalformedNextUpSeedContentId(contentId: String?): Boolean {
     }
 }
 
-private fun choosePreferredNextUpSeed(items: List<WatchProgress>): WatchProgress? {
+private fun choosePreferredNextUpSeed(items: List<WatchProgress>, nextUpFromFurthestEpisode: Boolean = true): WatchProgress? {
     if (items.isEmpty()) return null
     val bestRank = items.minOf(::nextUpSeedSourceRank)
     return items
         .asSequence()
         .filter { nextUpSeedSourceRank(it) == bestRank }
         .maxWithOrNull(
-            compareBy<WatchProgress>(
-                { it.season ?: -1 },
-                { it.episode ?: -1 },
-                { it.lastWatched }
-            )
+            if (nextUpFromFurthestEpisode) {
+                compareBy<WatchProgress>(
+                    { it.season ?: -1 },
+                    { it.episode ?: -1 },
+                    { it.lastWatched }
+                )
+            } else {
+                compareBy<WatchProgress>(
+                    { it.lastWatched },
+                    { it.season ?: -1 },
+                    { it.episode ?: -1 }
+                )
+            }
         )
 }
 
@@ -1245,6 +1276,7 @@ private suspend fun HomeViewModel.buildLightweightNextUpItems(
     inProgressItems: List<ContinueWatchingItem.InProgress>,
     dismissedNextUp: Set<String>,
     showUnairedNextUp: Boolean,
+    nextUpFromFurthestEpisode: Boolean = true,
     debug: CwDebugSession? = null,
     onPartialUpdate: suspend (List<ContinueWatchingItem.NextUp>) -> Unit = {}
 ): List<ContinueWatchingItem.NextUp> = coroutineScope {
@@ -1290,7 +1322,7 @@ private suspend fun HomeViewModel.buildLightweightNextUpItems(
                     .joinToString(" || ") { it.toNextUpTraceString() }
                 logNextUpDecision("seed-group contentId=${items.first().contentId} candidates=$candidates")
             }
-            val chosen = choosePreferredNextUpSeed(items)
+            val chosen = choosePreferredNextUpSeed(items, nextUpFromFurthestEpisode)
             if (chosen != null && shouldTraceNextUpSeries(chosen)) {
                 logNextUpDecision(
                     "seed-picked ${chosen.toNextUpTraceString()} rank=${nextUpSeedSourceRank(chosen)}"
@@ -1342,8 +1374,11 @@ private suspend fun HomeViewModel.buildLightweightNextUpItems(
         launch(Dispatchers.IO) {
             lookupSemaphore.withPermit {
                 processedContentIds.add(progress.contentId)
+                // Remap seed from Trakt numbering to addon numbering (for anime).
+                // Done here (after filters) so only ~5-10 seeds are remapped, not all 189.
+                val remappedProgress = watchProgressRepository.remapEpisodeSeed(progress)
                 val nextUp = buildNextUpItem(
-                    progress = progress,
+                    progress = remappedProgress,
                     showUnairedNextUp = showUnairedNextUp,
                     debug = debug
                 ) ?: run {
@@ -1398,12 +1433,36 @@ private suspend fun HomeViewModel.enrichVisibleContinueWatchingItems(
         .sortedBy { it.first }
         .map { it.second }
 
-    if (enrichedItems == finalItems) return@coroutineScope false
+    // Re-sort if any sortTimestamp changed during enrichment (e.g. release alert
+    // detected after TMDB provided a more accurate release date).
+    val sortChanged = enrichedItems.zip(finalItems).any { (enriched, original) ->
+        val enrichedTs = when (enriched) {
+            is ContinueWatchingItem.InProgress -> enriched.progress.lastWatched
+            is ContinueWatchingItem.NextUp -> enriched.info.sortTimestamp
+        }
+        val originalTs = when (original) {
+            is ContinueWatchingItem.InProgress -> original.progress.lastWatched
+            is ContinueWatchingItem.NextUp -> original.info.sortTimestamp
+        }
+        enrichedTs != originalTs
+    }
+    val sortedEnrichedItems = if (sortChanged) {
+        enrichedItems.sortedByDescending { item ->
+            when (item) {
+                is ContinueWatchingItem.InProgress -> item.progress.lastWatched
+                is ContinueWatchingItem.NextUp -> item.info.sortTimestamp
+            }
+        }
+    } else {
+        enrichedItems
+    }
+
+    if (sortedEnrichedItems == finalItems) return@coroutineScope false
 
     // Save enriched next-up info to in-memory overlay so the next CW cycle's
     // cached/partial/normal emissions use enriched data from the start,
     // preventing title/thumbnail flickering between addon and TMDB values.
-    enrichedItems.forEach { item ->
+    sortedEnrichedItems.forEach { item ->
         when (item) {
             is ContinueWatchingItem.NextUp -> {
                 cwEnrichedNextUpOverlay[item.info.contentId] = item.info
@@ -1415,15 +1474,15 @@ private suspend fun HomeViewModel.enrichVisibleContinueWatchingItems(
     }
 
     _uiState.update { state ->
-        if (state.continueWatchingItems == enrichedItems) {
+        if (state.continueWatchingItems == sortedEnrichedItems) {
             state
         } else {
-            state.copy(continueWatchingItems = enrichedItems)
+            state.copy(continueWatchingItems = sortedEnrichedItems)
         }
     }
     persistLocalContinueWatchingMetadata(
         originalItems = finalItems,
-        enrichedItems = enrichedItems
+        enrichedItems = sortedEnrichedItems
     )
     true
 }
@@ -1700,7 +1759,7 @@ private suspend fun HomeViewModel.enrichNextUpItem(
         imdbRating = if (settings.useBasicInfo) tmdbData?.rating?.toFloat() ?: meta.imdbRating ?: item.info.imdbRating else meta.imdbRating ?: item.info.imdbRating,
         genres = meta.genres.take(3).ifEmpty { item.info.genres },
         releaseInfo = meta.releaseInfo?.takeIf { it.isNotBlank() } ?: item.info.releaseInfo,
-        sortTimestamp = item.info.sortTimestamp,
+        sortTimestamp = releaseState.sortTimestamp,
         releaseTimestamp = releaseState.releaseTimestamp,
         isReleaseAlert = releaseState.isReleaseAlert,
         isNewSeasonRelease = releaseState.isNewSeasonRelease,
@@ -1987,7 +2046,7 @@ private suspend fun HomeViewModel.resolveMetaForProgress(
             for (candidateId in idCandidates) {
                 attempts += 1
                 val attemptStartedAtMs = SystemClock.elapsedRealtime()
-                val result = withTimeoutOrNull(2_500L) {
+                val result = withTimeoutOrNull(6_000L) {
                     if (useAllAddons) {
                         metaRepository.getMetaFromAllAddons(
                             type = type,
@@ -2294,11 +2353,13 @@ private fun HomeViewModel.applyContinueWatchingEnrichmentOverlay(
     items: List<ContinueWatchingItem>
 ): List<ContinueWatchingItem> {
     if (cwEnrichedNextUpOverlay.isEmpty() && cwEnrichedInProgressOverlay.isEmpty()) return items
-    return items.map { item ->
+    var sortChanged = false
+    val mapped = items.map { item ->
         when (item) {
             is ContinueWatchingItem.NextUp -> {
                 val overlay = cwEnrichedNextUpOverlay[item.info.contentId] ?: return@map item
                 if (overlay.season != item.info.season || overlay.episode != item.info.episode) return@map item
+                if (overlay.sortTimestamp != item.info.sortTimestamp) sortChanged = true
                 item.copy(info = item.info.copy(
                     name = overlay.name.takeIf { it.isNotBlank() } ?: item.info.name,
                     episodeTitle = overlay.episodeTitle ?: item.info.episodeTitle,
@@ -2310,8 +2371,11 @@ private fun HomeViewModel.applyContinueWatchingEnrichmentOverlay(
                     imdbRating = overlay.imdbRating ?: item.info.imdbRating,
                     genres = overlay.genres.ifEmpty { item.info.genres },
                     releaseInfo = overlay.releaseInfo ?: item.info.releaseInfo,
+                    sortTimestamp = overlay.sortTimestamp,
                     isReleaseAlert = overlay.isReleaseAlert,
                     isNewSeasonRelease = overlay.isNewSeasonRelease,
+                    hasAired = overlay.hasAired,
+                    airDateLabel = overlay.airDateLabel ?: item.info.airDateLabel,
                     releaseTimestamp = overlay.releaseTimestamp ?: item.info.releaseTimestamp,
                     contentLanguage = overlay.contentLanguage ?: item.info.contentLanguage
                 ))
@@ -2336,6 +2400,17 @@ private fun HomeViewModel.applyContinueWatchingEnrichmentOverlay(
                 )
             }
         }
+    }
+    // Re-sort if any sortTimestamp was updated by the overlay to maintain correct order.
+    return if (sortChanged) {
+        mapped.sortedByDescending { item ->
+            when (item) {
+                is ContinueWatchingItem.InProgress -> item.progress.lastWatched
+                is ContinueWatchingItem.NextUp -> item.info.sortTimestamp
+            }
+        }
+    } else {
+        mapped
     }
 }
 
