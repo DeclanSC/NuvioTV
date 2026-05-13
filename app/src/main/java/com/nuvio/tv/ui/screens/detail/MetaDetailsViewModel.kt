@@ -326,6 +326,7 @@ class MetaDetailsViewModel @Inject constructor(
             is MetaDetailsEvent.OnMarkSeasonWatched -> markSeasonWatched(event.season)
             is MetaDetailsEvent.OnMarkSeasonUnwatched -> markSeasonUnwatched(event.season)
             is MetaDetailsEvent.OnMarkPreviousEpisodesWatched -> markPreviousEpisodesWatched(event.video)
+            is MetaDetailsEvent.OnMarkPreviousSeasonsWatched -> markPreviousSeasonsWatched(event.season)
             MetaDetailsEvent.OnLibraryLongPress -> openListPicker()
             is MetaDetailsEvent.OnPickerMembershipToggled -> togglePickerMembership(event.listKey)
             MetaDetailsEvent.OnPickerSave -> savePickerMembership()
@@ -447,9 +448,51 @@ class MetaDetailsViewModel @Inject constructor(
                         state.copy(episodeProgressMap = progressMap)
                     }
                 }
+                // Revalidate local watched items against Trakt truth
+                revalidateLocalWatchedEpisodesAgainstTrakt(progressMap)
                 // Recalculate next to watch when progress changes
                 reevaluateSeriesWatchedBadge()
                 calculateNextToWatch()
+            }
+        }
+    }
+
+    /**
+     * Removes local watched-episode entries that Trakt doesn't confirm,
+     * preventing stale state when a Trakt sync silently fails.
+     */
+    private fun revalidateLocalWatchedEpisodesAgainstTrakt(
+        traktProgressMap: Map<Pair<Int, Int>, WatchProgress>
+    ) {
+        if (itemType.equals("other", ignoreCase = true)) return
+        if (itemType.equals("movie", ignoreCase = true)) return
+        if (traktProgressMap.isEmpty()) return
+        val hasCompletedEntries = traktProgressMap.values.any { it.isCompleted() }
+        if (!hasCompletedEntries) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val isTraktActive = try {
+                watchProgressRepository.isTraktProgressActive()
+            } catch (_: Exception) { false }
+            if (!isTraktActive) return@launch
+
+            val contentId = _effectiveContentId.value
+            val localWatched = watchedItemsPreferences
+                .getWatchedEpisodesForContent(contentId)
+                .first()
+            if (localWatched.isEmpty()) return@launch
+
+            val staleEpisodes = localWatched.filter { (season, episode) ->
+                val traktEntry = traktProgressMap[season to episode]
+                traktEntry == null || !traktEntry.isCompleted()
+            }
+
+            if (staleEpisodes.isNotEmpty()) {
+                Log.d(TAG, "revalidateWatchedEpisodes: pruning ${staleEpisodes.size} stale entries for $contentId")
+                watchedItemsPreferences.unmarkAsWatchedBatch(
+                    contentId = contentId,
+                    episodes = staleEpisodes.toList()
+                )
             }
         }
     }
@@ -675,7 +718,12 @@ class MetaDetailsViewModel @Inject constructor(
             awards = null,
             language = enrichment.language,
             links = emptyList(),
-            trailers = enrichment.trailers
+            // Honor the "Disable Trailers in TMDB Enrichment" toggle even on
+            // this synthetic fallback meta (issue #1647). The main enrichment
+            // merge at the bottom of applyMetaWithEnrichment already gates on
+            // settings.useTrailers; without the same gate here, the fallback
+            // path would smuggle TMDB trailers in unconditionally.
+            trailers = if (settings.useTrailers) enrichment.trailers else emptyList()
         )
         applyMetaWithEnrichment(meta)
         return true
@@ -1855,7 +1903,7 @@ class MetaDetailsViewModel @Inject constructor(
                 showMessage(message)
             }.onFailure { error ->
                 showMessage(
-                    message = error.message ?: "Failed to update library",
+                    message = error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_update_library_failed),
                     isError = true
                 )
             }
@@ -1880,11 +1928,11 @@ class MetaDetailsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         pickerPending = false,
-                        pickerError = error.message ?: "Failed to load lists",
+                        pickerError = error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_load_lists_failed),
                         showListPicker = false
                     )
                 }
-                showMessage(error.message ?: "Failed to load lists", isError = true)
+                showMessage(error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_load_lists_failed), isError = true)
             }
         }
     }
@@ -1927,10 +1975,10 @@ class MetaDetailsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         pickerPending = false,
-                        pickerError = error.message ?: "Failed to update lists"
+                        pickerError = error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_update_lists_failed)
                     )
                 }
-                showMessage(error.message ?: "Failed to update lists", isError = true)
+                showMessage(error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_update_lists_failed), isError = true)
             }
         }
     }
@@ -1962,7 +2010,7 @@ class MetaDetailsViewModel @Inject constructor(
                 }
             }.onFailure { error ->
                 showMessage(
-                    message = error.message ?: "Failed to update watched status",
+                    message = error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_update_watched_failed),
                     isError = true
                 )
             }
@@ -1994,7 +2042,7 @@ class MetaDetailsViewModel @Inject constructor(
                 }
             }.onFailure { error ->
                 showMessage(
-                    message = error.message ?: "Failed to update episode watched status",
+                    message = error.message ?: context.getString(com.nuvio.tv.R.string.detail_error_update_episode_watched_failed),
                     isError = true
                 )
             }
@@ -2150,6 +2198,46 @@ class MetaDetailsViewModel @Inject constructor(
                 it.copy(episodeWatchedPendingKeys = it.episodeWatchedPendingKeys - pendingKeys)
             }
             showMessage(localizedContext.getString(R.string.detail_marked_previous_watched, unwatched.size))
+        }
+    }
+
+    private fun markPreviousSeasonsWatched(targetSeason: Int) {
+        val meta = _uiState.value.meta ?: return
+        suppressSeasonAutoSwitch = true
+        viewModelScope.launch {
+            val episodes = if (meta.apiType.equals("other", ignoreCase = true)) {
+                _uiState.value.episodesForSeason.filter { it.season != null && it.season < targetSeason && it.episode != null }
+            } else {
+                meta.videos.filter { it.season != null && it.season < targetSeason && it.episode != null }
+            }
+            val unwatched = episodes.filter { video ->
+                val s = video.season!!
+                val e = video.episode!!
+                val isWatched = _uiState.value.episodeProgressMap[s to e]?.isCompleted() == true
+                    || _uiState.value.watchedEpisodes.contains(s to e)
+                !isWatched
+            }
+            if (unwatched.isEmpty()) {
+                showMessage(localizedContext.getString(R.string.detail_all_previous_seasons_watched))
+                return@launch
+            }
+
+            val pendingKeys = unwatched.map { episodePendingKey(it) }.toSet()
+            _uiState.update {
+                it.copy(episodeWatchedPendingKeys = it.episodeWatchedPendingKeys + pendingKeys)
+            }
+
+            runCatching {
+                val progressList = unwatched.map { buildCompletedEpisodeProgress(meta, it) }
+                watchProgressRepository.markAsCompletedBatch(progressList)
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to batch mark previous seasons as watched: ${error.message}")
+            }
+
+            _uiState.update {
+                it.copy(episodeWatchedPendingKeys = it.episodeWatchedPendingKeys - pendingKeys)
+            }
+            showMessage(localizedContext.getString(R.string.detail_marked_episodes_watched, unwatched.size))
         }
     }
 

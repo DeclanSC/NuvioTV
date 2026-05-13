@@ -458,7 +458,7 @@ private fun EpisodeCard(
     val isWatched = remember(watchProgress, isMarkedWatched) { watchProgress?.isCompleted() == true || isMarkedWatched }
     val shouldBlur = remember(blurUnwatched, isWatched) { blurUnwatched && !isWatched }
     val progressPercent = remember(watchProgress) { watchProgress?.progressPercentage ?: 0f }
-    val showProgress = remember(progressPercent) { progressPercent >= 0.02f && progressPercent < 0.85f }
+    val showProgress = remember(watchProgress) { watchProgress?.isInProgress() == true }
     val showCompletedBadge = isWatched
     val showNotStartedBadge = remember(showCompletedBadge, progressPercent) { !showCompletedBadge && progressPercent < 0.02f }
     val isUnavailable = remember(episode.available) { episode.available == false }
@@ -981,9 +981,11 @@ private fun EpisodeOptionsDialog(
 fun SeasonOptionsDialog(
     season: Int,
     isFullyWatched: Boolean,
+    hasPreviousSeasons: Boolean = false,
     onDismiss: () -> Unit,
     onMarkSeasonWatched: () -> Unit,
-    onMarkSeasonUnwatched: () -> Unit
+    onMarkSeasonUnwatched: () -> Unit,
+    onMarkPreviousSeasonsWatched: () -> Unit = {}
 ) {
     val primaryFocusRequester = remember { FocusRequester() }
 
@@ -1007,6 +1009,19 @@ fun SeasonOptionsDialog(
             )
         ) {
             Text(if (isFullyWatched) stringResource(R.string.episodes_mark_season_unwatched) else stringResource(R.string.episodes_mark_season_watched))
+        }
+
+        if (hasPreviousSeasons && season > 0) {
+            Button(
+                onClick = onMarkPreviousSeasonsWatched,
+                colors = ButtonDefaults.colors(
+                    containerColor = NuvioColors.BackgroundCard,
+                    contentColor = NuvioColors.TextPrimary
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.episodes_mark_previous_seasons_watched))
+            }
         }
     }
 }
@@ -1162,7 +1177,7 @@ private fun formatEpisodeCardDate(isoDate: String): String {
 
     return try {
         val localDate = java.time.Instant.parse(isoDate)
-            .atZone(java.time.ZoneOffset.UTC)
+            .atZone(java.time.ZoneId.systemDefault())
             .toLocalDate()
 
         formatter.format(localDate)

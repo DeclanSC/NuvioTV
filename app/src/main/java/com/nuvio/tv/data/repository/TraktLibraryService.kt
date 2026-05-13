@@ -1,5 +1,7 @@
 package com.nuvio.tv.data.repository
 
+import android.content.Context
+import com.nuvio.tv.R
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.core.trakt.traktBestBackdropUrl
 import com.nuvio.tv.core.trakt.traktBestLogoUrl
@@ -20,6 +22,7 @@ import com.nuvio.tv.domain.model.LibraryListTab
 import com.nuvio.tv.domain.model.ListMembershipChanges
 import com.nuvio.tv.domain.model.ListMembershipSnapshot
 import com.nuvio.tv.domain.model.TraktListPrivacy
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,6 +45,7 @@ import retrofit2.Response
 
 @Singleton
 class TraktLibraryService @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val traktApi: TraktApi,
     private val traktAuthService: TraktAuthService,
     private val profileManager: ProfileManager
@@ -192,10 +196,10 @@ class TraktLibraryService @Inject constructor(
                     privacy = privacy.apiValue
                 )
             )
-        } ?: throw IllegalStateException("Trakt request failed")
+        } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
         if (!response.isSuccessful) {
-            throw IllegalStateException(errorMessageForCode(response.code(), "Failed to create list"))
+            throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_create_list_failed)))
         }
 
         val createdTab = response.body()?.let(::mapListTab)
@@ -244,10 +248,10 @@ class TraktLibraryService @Inject constructor(
                         privacy = privacy.apiValue
                     )
                 )
-            } ?: throw IllegalStateException("Trakt request failed")
+            } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
             if (!response.isSuccessful) {
-                throw IllegalStateException(errorMessageForCode(response.code(), "Failed to update list"))
+                throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_update_list_failed)))
             }
         }
     }
@@ -270,10 +274,10 @@ class TraktLibraryService @Inject constructor(
                     id = ME_PATH,
                     listId = listId
                 )
-            } ?: throw IllegalStateException("Trakt request failed")
+            } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
             if (!response.isSuccessful && response.code() != 204) {
-                throw IllegalStateException(errorMessageForCode(response.code(), "Failed to delete list"))
+                throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_delete_list_failed)))
             }
         }
     }
@@ -305,10 +309,10 @@ class TraktLibraryService @Inject constructor(
                     id = ME_PATH,
                     body = TraktReorderListsRequestDto(rank = rank)
                 )
-            } ?: throw IllegalStateException("Trakt request failed")
+            } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
             if (!response.isSuccessful) {
-                throw IllegalStateException(errorMessageForCode(response.code(), "Failed to reorder lists"))
+                throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_reorder_lists_failed)))
             }
         }
     }
@@ -457,7 +461,7 @@ class TraktLibraryService @Inject constructor(
             add(
                 LibraryListTab(
                     key = WATCHLIST_KEY,
-                    title = "Watchlist",
+                    title = appContext.getString(R.string.library_watchlist),
                     type = LibraryListTab.Type.WATCHLIST,
                     sortBy = "rank",
                     sortHow = "asc"
@@ -521,7 +525,7 @@ class TraktLibraryService @Inject constructor(
                     sort = "rank",
                     page = page
                 )
-            } ?: throw IllegalStateException("Failed to fetch watchlist movies")
+            } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_fetch_watchlist_movies))
         }
 
         val shows = fetchAllPages<TraktListItemDto> { page ->
@@ -533,7 +537,7 @@ class TraktLibraryService @Inject constructor(
                     sort = "rank",
                     page = page
                 )
-            } ?: throw IllegalStateException("Failed to fetch watchlist shows")
+            } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_fetch_watchlist_shows))
         }
 
         return (movies + shows)
@@ -555,10 +559,10 @@ class TraktLibraryService @Inject constructor(
                 authorization = authHeader,
                 id = ME_PATH
             )
-        } ?: throw IllegalStateException("Failed to fetch personal lists")
+        } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_fetch_personal_lists))
 
         if (!response.isSuccessful) {
-            throw IllegalStateException("Failed to fetch personal lists (${response.code()})")
+            throw IllegalStateException("${appContext.getString(com.nuvio.tv.R.string.trakt_library_error_fetch_personal_lists)} (${response.code()})")
         }
 
         val personal = response.body().orEmpty()
@@ -622,7 +626,7 @@ class TraktLibraryService @Inject constructor(
                     sortBy = sortBy?.takeIf { it.isNotBlank() },
                     sortHow = sortHow?.takeIf { it.isNotBlank() }
                 )
-            } ?: throw IllegalStateException("Failed to fetch list items")
+            } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_fetch_list_items))
         }
         return items.mapNotNull { mapListItem(listKey = listKey, item = it) }
     }
@@ -634,7 +638,7 @@ class TraktLibraryService @Inject constructor(
 
         return LibraryListTab(
             key = PERSONAL_KEY_PREFIX + listIdPath,
-            title = dto.name?.takeIf { it.isNotBlank() } ?: "List",
+            title = dto.name?.takeIf { it.isNotBlank() } ?: appContext.getString(com.nuvio.tv.R.string.library_list_fallback_title),
             type = LibraryListTab.Type.PERSONAL,
             traktListId = traktId,
             slug = slug,
@@ -732,10 +736,10 @@ class TraktLibraryService @Inject constructor(
                 authorization = authHeader,
                 body = body
             )
-        } ?: throw IllegalStateException("Trakt request failed")
+        } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
         if (!response.isSuccessful || !isSuccessfulAddResponse(response.body())) {
-            throw IllegalStateException(errorMessageForCode(response.code(), "Failed to add to watchlist"))
+            throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_add_watchlist_failed)))
         }
     }
 
@@ -746,10 +750,10 @@ class TraktLibraryService @Inject constructor(
                 authorization = authHeader,
                 body = body
             )
-        } ?: throw IllegalStateException("Trakt request failed")
+        } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
         if (!response.isSuccessful) {
-            throw IllegalStateException(errorMessageForCode(response.code(), "Failed to remove from watchlist"))
+            throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_remove_watchlist_failed)))
         }
     }
 
@@ -762,10 +766,10 @@ class TraktLibraryService @Inject constructor(
                 listId = listId,
                 body = body
             )
-        } ?: throw IllegalStateException("Trakt request failed")
+        } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
         if (!response.isSuccessful || !isSuccessfulAddResponse(response.body())) {
-            throw IllegalStateException(errorMessageForCode(response.code(), "Failed to add to list"))
+            throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_add_to_list_failed)))
         }
     }
 
@@ -778,17 +782,17 @@ class TraktLibraryService @Inject constructor(
                 listId = listId,
                 body = body
             )
-        } ?: throw IllegalStateException("Trakt request failed")
+        } ?: throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_request_failed))
 
         if (!response.isSuccessful) {
-            throw IllegalStateException(errorMessageForCode(response.code(), "Failed to remove from list"))
+            throw IllegalStateException(errorMessageForCode(response.code(), appContext.getString(com.nuvio.tv.R.string.trakt_library_error_remove_from_list_failed)))
         }
     }
 
     private fun buildMutationBody(item: LibraryEntryInput): TraktListItemsMutationRequestDto {
         val ids = resolveIds(item)
         if (!ids.hasAnyId()) {
-            throw IllegalStateException("Missing compatible IDs for Trakt list operation")
+            throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_missing_compatible_ids))
         }
 
         val normalizedType = normalizeItemType(item.itemType)
@@ -834,9 +838,9 @@ class TraktLibraryService @Inject constructor(
 
     private fun errorMessageForCode(code: Int, defaultMessage: String): String {
         return when (code) {
-            401, 403 -> "Trakt authentication expired"
-            404 -> "Trakt list not found"
-            420 -> "Trakt list limit reached. Upgrade required."
+            401, 403 -> appContext.getString(com.nuvio.tv.R.string.trakt_library_error_auth_expired)
+            404 -> appContext.getString(com.nuvio.tv.R.string.trakt_library_error_list_not_found)
+            420 -> appContext.getString(com.nuvio.tv.R.string.trakt_library_error_list_limit_reached)
             else -> "$defaultMessage ($code)"
         }
     }
@@ -889,7 +893,7 @@ class TraktLibraryService @Inject constructor(
         while (true) {
             val response = fetch(currentPage)
             if (!response.isSuccessful) {
-                throw IllegalStateException("Trakt paginated fetch failed (${response.code()})")
+                throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_paginated_fetch_failed, response.code()))
             }
             allItems.addAll(response.body().orEmpty())
             val pageCount = response.headers()["X-Pagination-Page-Count"]?.toIntOrNull() ?: 1

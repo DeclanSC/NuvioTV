@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nuvio.tv.R
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.tmdb.TmdbCollectionSourceResolver
+import com.nuvio.tv.core.util.isUnreleased
 import com.nuvio.tv.core.trakt.TraktPublicListSourceResolver
 import com.nuvio.tv.data.trailer.TrailerService
 import com.nuvio.tv.data.local.CollectionsDataStore
@@ -139,6 +141,18 @@ class FolderDetailViewModel @Inject constructor(
     private var activeTrailerPreviewItemId: String? = null
     private var trailerPreviewRequestVersion: Long = 0L
 
+    /** Items for which enrichment was attempted but produced no enriched data. */
+    private val _failedEnrichmentIds = MutableStateFlow<Set<String>>(emptySet())
+    val failedEnrichmentIds: StateFlow<Set<String>> = _failedEnrichmentIds.asStateFlow()
+
+    private val _scrollToTopTrigger = MutableStateFlow(0)
+    val scrollToTopTrigger: StateFlow<Int> = _scrollToTopTrigger.asStateFlow()
+
+    private var adjacentItemPrefetchJob: Job? = null
+    private var pendingAdjacentPrefetchItemId: String? = null
+    private val prefetchedTmdbIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val prefetchedExternalMetaIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private val _rowsFocusState = MutableStateFlow(com.nuvio.tv.ui.screens.home.HomeScreenFocusState())
     val rowsFocusState: StateFlow<com.nuvio.tv.ui.screens.home.HomeScreenFocusState> = _rowsFocusState.asStateFlow()
 
@@ -245,7 +259,14 @@ class FolderDetailViewModel @Inject constructor(
             }
 
             val tabs = if (showAll) {
-                listOf(FolderTab(label = "All", typeLabel = "Combined", isLoading = true, isAllTab = true)) + sourceTabs
+                listOf(
+                    FolderTab(
+                        label = appContext.getString(com.nuvio.tv.R.string.collections_tab_all),
+                        typeLabel = appContext.getString(com.nuvio.tv.R.string.collections_tab_combined),
+                        isLoading = true,
+                        isAllTab = true
+                    )
+                ) + sourceTabs
             } else {
                 sourceTabs
             }
@@ -351,56 +372,83 @@ class FolderDetailViewModel @Inject constructor(
 
         val anyLoading = sourceTabs.any { it.isLoading }
 
-        // Build modern presentation so ModernHomeContent has carousel rows to render.
-        val modernPresentation = _uiState.value.let { s ->
-            if (s.homeLayout == HomeLayout.MODERN) {
-                buildModernHomePresentation(
+        // Build modern presentation off the main thread to avoid jank.
+        val needsModernPresentation = _uiState.value.homeLayout == HomeLayout.MODERN
+        if (needsModernPresentation) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                val modernPresentation = buildModernHomePresentation(
                     input = ModernHomePresentationInput(
                         homeRows = homeRows,
                         catalogRows = loadedRows,
                         continueWatchingItems = emptyList(),
-                        useLandscapePosters = s.modernLandscapePostersEnabled,
-                        showCatalogTypeSuffix = s.catalogTypeSuffixEnabled,
-                        showFullReleaseDate = s.showFullReleaseDate,
+                        useLandscapePosters = state.modernLandscapePostersEnabled,
+                        showCatalogTypeSuffix = state.catalogTypeSuffixEnabled,
+                        showFullReleaseDate = state.showFullReleaseDate,
                         localeTag = com.nuvio.tv.LocaleCache.localeTag
                     ),
                     cache = modernCarouselRowBuildCache,
                     context = appContext
                 )
-            } else null
-        }
-
-        _uiState.update { s ->
-            val homeState = HomeUiState(
-                catalogRows = loadedRows,
-                homeRows = homeRows,
-                gridItems = gridItems,
-                heroItems = emptyList(),
-                heroSectionEnabled = false,
-                isLoading = anyLoading,
-                homeLayout = s.homeLayout,
-                posterLabelsEnabled = if (s.homeLayout == HomeLayout.MODERN) false else s.posterLabelsEnabled,
-                modernLandscapePostersEnabled = s.modernLandscapePostersEnabled,
-                modernHeroFullScreenBackdropEnabled = s.modernHeroFullScreenBackdropEnabled,
-                catalogAddonNameEnabled = s.catalogAddonNameEnabled,
-                catalogTypeSuffixEnabled = s.catalogTypeSuffixEnabled,
-                focusedPosterBackdropExpandEnabled = s.focusedPosterBackdropExpandEnabled,
-                focusedPosterBackdropExpandDelaySeconds = s.focusedPosterBackdropExpandDelaySeconds,
-                focusedPosterBackdropTrailerEnabled = s.focusedPosterBackdropTrailerEnabled,
-                focusedPosterBackdropTrailerMuted = s.focusedPosterBackdropTrailerMuted,
-                focusedPosterBackdropTrailerPlaybackTarget = s.focusedPosterBackdropTrailerPlaybackTarget,
-                posterCardWidthDp = s.posterCardWidthDp,
-                posterCardHeightDp = s.posterCardHeightDp,
-                posterCardCornerRadiusDp = s.posterCardCornerRadiusDp,
-                hideUnreleasedContent = s.hideUnreleasedContent,
-                showFullReleaseDate = s.showFullReleaseDate,
-                movieWatchedStatus = s.movieWatchedStatus
-            )
-            s.copy(followLayoutHomeState = if (modernPresentation != null) {
-                homeState.copy(modernHomePresentation = modernPresentation)
-            } else {
-                homeState
-            })
+                _uiState.update { s ->
+                    val homeState = HomeUiState(
+                        catalogRows = loadedRows,
+                        homeRows = homeRows,
+                        gridItems = gridItems,
+                        heroItems = emptyList(),
+                        heroSectionEnabled = false,
+                        isLoading = anyLoading,
+                        homeLayout = s.homeLayout,
+                        posterLabelsEnabled = if (s.homeLayout == HomeLayout.MODERN) false else s.posterLabelsEnabled,
+                        modernLandscapePostersEnabled = s.modernLandscapePostersEnabled,
+                        modernHeroFullScreenBackdropEnabled = s.modernHeroFullScreenBackdropEnabled,
+                        catalogAddonNameEnabled = s.catalogAddonNameEnabled,
+                        catalogTypeSuffixEnabled = s.catalogTypeSuffixEnabled,
+                        focusedPosterBackdropExpandEnabled = s.focusedPosterBackdropExpandEnabled,
+                        focusedPosterBackdropExpandDelaySeconds = s.focusedPosterBackdropExpandDelaySeconds,
+                        focusedPosterBackdropTrailerEnabled = s.focusedPosterBackdropTrailerEnabled,
+                        focusedPosterBackdropTrailerMuted = s.focusedPosterBackdropTrailerMuted,
+                        focusedPosterBackdropTrailerPlaybackTarget = s.focusedPosterBackdropTrailerPlaybackTarget,
+                        posterCardWidthDp = s.posterCardWidthDp,
+                        posterCardHeightDp = s.posterCardHeightDp,
+                        posterCardCornerRadiusDp = s.posterCardCornerRadiusDp,
+                        hideUnreleasedContent = s.hideUnreleasedContent,
+                        showFullReleaseDate = s.showFullReleaseDate,
+                        movieWatchedStatus = s.movieWatchedStatus,
+                        heroEnrichmentEnabled = true
+                    )
+                    s.copy(followLayoutHomeState = homeState.copy(modernHomePresentation = modernPresentation))
+                }
+            }
+        } else {
+            _uiState.update { s ->
+                val homeState = HomeUiState(
+                    catalogRows = loadedRows,
+                    homeRows = homeRows,
+                    gridItems = gridItems,
+                    heroItems = emptyList(),
+                    heroSectionEnabled = false,
+                    isLoading = anyLoading,
+                    homeLayout = s.homeLayout,
+                    posterLabelsEnabled = s.posterLabelsEnabled,
+                    modernLandscapePostersEnabled = s.modernLandscapePostersEnabled,
+                    modernHeroFullScreenBackdropEnabled = s.modernHeroFullScreenBackdropEnabled,
+                    catalogAddonNameEnabled = s.catalogAddonNameEnabled,
+                    catalogTypeSuffixEnabled = s.catalogTypeSuffixEnabled,
+                    focusedPosterBackdropExpandEnabled = s.focusedPosterBackdropExpandEnabled,
+                    focusedPosterBackdropExpandDelaySeconds = s.focusedPosterBackdropExpandDelaySeconds,
+                    focusedPosterBackdropTrailerEnabled = s.focusedPosterBackdropTrailerEnabled,
+                    focusedPosterBackdropTrailerMuted = s.focusedPosterBackdropTrailerMuted,
+                    focusedPosterBackdropTrailerPlaybackTarget = s.focusedPosterBackdropTrailerPlaybackTarget,
+                    posterCardWidthDp = s.posterCardWidthDp,
+                    posterCardHeightDp = s.posterCardHeightDp,
+                    posterCardCornerRadiusDp = s.posterCardCornerRadiusDp,
+                    hideUnreleasedContent = s.hideUnreleasedContent,
+                    showFullReleaseDate = s.showFullReleaseDate,
+                    movieWatchedStatus = s.movieWatchedStatus,
+                    heroEnrichmentEnabled = true
+                )
+                s.copy(followLayoutHomeState = homeState)
+            }
         }
     }
 
@@ -436,7 +484,10 @@ class FolderDetailViewModel @Inject constructor(
                 _uiState.update { state ->
                     val tabs = state.tabs.toMutableList()
                     if (tabIndex < tabs.size) {
-                        tabs[tabIndex] = tabs[tabIndex].copy(isLoading = false, error = "Addon not found")
+                        tabs[tabIndex] = tabs[tabIndex].copy(
+                            isLoading = false,
+                            error = appContext.getString(R.string.addon_error_not_found)
+                        )
                     }
                     state.copy(tabs = tabs)
                 }
@@ -482,7 +533,7 @@ class FolderDetailViewModel @Inject constructor(
                             val tabs = state.tabs.toMutableList()
                             if (tabIndex < tabs.size) {
                                 tabs[tabIndex] = tabs[tabIndex].copy(
-                                    catalogRow = result.data,
+                                    catalogRow = result.data.filteredForRelease(state.hideUnreleasedContent),
                                     isLoading = false
                                 )
                             }
@@ -571,7 +622,13 @@ class FolderDetailViewModel @Inject constructor(
                             val currentTab = s.tabs.getOrNull(tabIndex)
                             val currentRow = currentTab?.catalogRow ?: return@update s
                             val existingIds = currentRow.items.map { "${it.apiType}:${it.id}" }.toHashSet()
-                            val newItems = result.data.items.filter { "${it.apiType}:${it.id}" !in existingIds }
+                            val incomingFiltered = if (s.hideUnreleasedContent) {
+                                val today = java.time.LocalDate.now()
+                                result.data.items.filterNot { it.isUnreleased(today) }
+                            } else {
+                                result.data.items
+                            }
+                            val newItems = incomingFiltered.filter { "${it.apiType}:${it.id}" !in existingIds }
                             val mergedItems = currentRow.items + newItems
                             val hasMore = if (newItems.isEmpty()) false else result.data.hasMore
 
@@ -637,16 +694,20 @@ class FolderDetailViewModel @Inject constructor(
     fun saveRowsFocusState(
         verticalScrollIndex: Int,
         verticalScrollOffset: Int,
-        focusedRowIndex: Int,
-        focusedItemIndex: Int,
-        catalogRowScrollStates: Map<String, Int>
+        focusedRowKey: String?,
+        focusedItemKeyByRow: Map<String, String>,
+        catalogRowScrollStates: Map<String, Int>,
+        focusedRowIndex: Int = 0,
+        focusedItemIndex: Int = 0
     ) {
         val nextState = com.nuvio.tv.ui.screens.home.HomeScreenFocusState(
             verticalScrollIndex = verticalScrollIndex,
             verticalScrollOffset = verticalScrollOffset,
+            focusedRowKey = focusedRowKey,
+            focusedItemKeyByRow = focusedItemKeyByRow,
+            catalogRowScrollStates = catalogRowScrollStates,
             focusedRowIndex = focusedRowIndex,
             focusedItemIndex = focusedItemIndex,
-            catalogRowScrollStates = catalogRowScrollStates,
             hasSavedFocus = true
         )
         if (_rowsFocusState.value != nextState) {
@@ -657,16 +718,20 @@ class FolderDetailViewModel @Inject constructor(
     fun saveFollowLayoutFocusState(
         verticalScrollIndex: Int,
         verticalScrollOffset: Int,
-        focusedRowIndex: Int,
-        focusedItemIndex: Int,
-        catalogRowScrollStates: Map<String, Int>
+        focusedRowKey: String?,
+        focusedItemKeyByRow: Map<String, String>,
+        catalogRowScrollStates: Map<String, Int>,
+        focusedRowIndex: Int = 0,
+        focusedItemIndex: Int = 0
     ) {
         val nextState = com.nuvio.tv.ui.screens.home.HomeScreenFocusState(
             verticalScrollIndex = verticalScrollIndex,
             verticalScrollOffset = verticalScrollOffset,
+            focusedRowKey = focusedRowKey,
+            focusedItemKeyByRow = focusedItemKeyByRow,
+            catalogRowScrollStates = catalogRowScrollStates,
             focusedRowIndex = focusedRowIndex,
             focusedItemIndex = focusedItemIndex,
-            catalogRowScrollStates = catalogRowScrollStates,
             hasSavedFocus = true
         )
         if (_followLayoutFocusState.value != nextState) {
@@ -708,16 +773,17 @@ class FolderDetailViewModel @Inject constructor(
                         _uiState.update { s ->
                             val tabs = s.tabs.toMutableList()
                             val currentRow = tabs.getOrNull(tabIndex)?.catalogRow
+                            val filteredData = result.data.filteredForRelease(s.hideUnreleasedContent)
                             val row = if (append && currentRow != null) {
                                 val existingIds = currentRow.items.map { "${it.apiType}:${it.id}" }.toHashSet()
-                                val newItems = result.data.items.filter { "${it.apiType}:${it.id}" !in existingIds }
-                                result.data.copy(
+                                val newItems = filteredData.items.filter { "${it.apiType}:${it.id}" !in existingIds }
+                                filteredData.copy(
                                     items = currentRow.items + newItems,
-                                    hasMore = result.data.hasMore && newItems.isNotEmpty(),
+                                    hasMore = filteredData.hasMore && newItems.isNotEmpty(),
                                     isLoading = false
                                 )
                             } else {
-                                result.data
+                                filteredData
                             }
                             if (tabIndex < tabs.size) tabs[tabIndex] = tabs[tabIndex].copy(catalogRow = row, isLoading = false)
                             s.copy(tabs = tabs)
@@ -765,16 +831,17 @@ class FolderDetailViewModel @Inject constructor(
                         _uiState.update { s ->
                             val tabs = s.tabs.toMutableList()
                             val currentRow = tabs.getOrNull(tabIndex)?.catalogRow
+                            val filteredData = result.data.filteredForRelease(s.hideUnreleasedContent)
                             val row = if (append && currentRow != null) {
                                 val existingIds = currentRow.items.map { "${it.apiType}:${it.id}" }.toHashSet()
-                                val newItems = result.data.items.filter { "${it.apiType}:${it.id}" !in existingIds }
-                                result.data.copy(
+                                val newItems = filteredData.items.filter { "${it.apiType}:${it.id}" !in existingIds }
+                                filteredData.copy(
                                     items = currentRow.items + newItems,
-                                    hasMore = result.data.hasMore && newItems.isNotEmpty(),
+                                    hasMore = filteredData.hasMore && newItems.isNotEmpty(),
                                     isLoading = false
                                 )
                             } else {
-                                result.data
+                                filteredData
                             }
                             if (tabIndex < tabs.size) tabs[tabIndex] = tabs[tabIndex].copy(catalogRow = row, isLoading = false)
                             s.copy(tabs = tabs)
@@ -806,8 +873,8 @@ class FolderDetailViewModel @Inject constructor(
 
     private fun buildAddonTabLabels(source: AddonCatalogCollectionSource, catalogName: String?): Pair<String, String> {
         val typeLabel = when (source.type.lowercase()) {
-            "movie" -> "Movies"
-            "series" -> "Series"
+            "movie" -> appContext.getString(R.string.type_movies)
+            "series" -> appContext.getString(R.string.type_series_plural)
             else -> source.type.replaceFirstChar { it.uppercase() }
         }
         val baseName = if (!catalogName.isNullOrBlank()) {
@@ -822,20 +889,20 @@ class FolderDetailViewModel @Inject constructor(
 
     private fun buildTmdbTypeLabel(source: TmdbCollectionSource): String {
         return when (source.sourceType.name) {
-            "LIST" -> "TMDB List"
-            "COLLECTION" -> "TMDB Movie Collection"
-            "COMPANY" -> "Production"
-            "NETWORK" -> "Network"
-            "PERSON" -> "Person Credits"
-            "DIRECTOR" -> "Director Credits"
-            else -> "TMDB Discover"
+            "LIST" -> appContext.getString(R.string.collections_editor_tmdb_default_list)
+            "COLLECTION" -> appContext.getString(R.string.collections_editor_tmdb_movie_collection)
+            "COMPANY" -> appContext.getString(R.string.collections_editor_tmdb_mode_production)
+            "NETWORK" -> appContext.getString(R.string.collections_editor_tmdb_mode_network)
+            "PERSON" -> appContext.getString(R.string.collections_editor_tmdb_person_credits)
+            "DIRECTOR" -> appContext.getString(R.string.collections_editor_tmdb_director_credits)
+            else -> appContext.getString(R.string.collections_editor_tmdb_default_discover)
         }
     }
 
     private fun buildTraktTypeLabel(source: TraktCollectionSource): String {
         return when (source.mediaType) {
-            com.nuvio.tv.domain.model.TmdbCollectionMediaType.MOVIE -> "Trakt Movie List"
-            com.nuvio.tv.domain.model.TmdbCollectionMediaType.TV -> "Trakt Series List"
+            com.nuvio.tv.domain.model.TmdbCollectionMediaType.MOVIE -> appContext.getString(R.string.collections_editor_trakt_movie_list)
+            com.nuvio.tv.domain.model.TmdbCollectionMediaType.TV -> appContext.getString(R.string.collections_editor_trakt_series_list)
         }
     }
 
@@ -889,7 +956,14 @@ class FolderDetailViewModel @Inject constructor(
                 }
             }
 
-            if (enrichment == null && !externalMetaEnabled) return@launch
+            if (enrichment == null && !externalMetaEnabled) {
+                // Mark as failed so the UI can show addon data immediately.
+                if (item.id !in _enrichedPreviews.value) {
+                    _failedEnrichmentIds.value = _failedEnrichmentIds.value + item.id
+                }
+                if (_enrichingItemId.value == item.id) _enrichingItemId.value = null
+                return@launch
+            }
             enrichedItemIds.add(item.id)
 
             // Apply TMDB enrichment if available.
@@ -925,9 +999,42 @@ class FolderDetailViewModel @Inject constructor(
                             status = finalEnrichment.status ?: result.status
                         )
                     }
+                    // Propagate TMDB-fetched localized trailer YT ids onto the item
+                    // so the trailer pipeline can use them as a fallback when the
+                    // direct TMDB videos lookup misses the user locale (e.g. Trakt
+                    // list items that didn't carry trailers from their addon).
+                    val enrichedYtIds = finalEnrichment.trailers.mapNotNull { it.ytId }.distinct()
+                    if (enrichedYtIds.isNotEmpty() && result.trailerYtIds.isEmpty()) {
+                        result = result.copy(trailerYtIds = enrichedYtIds)
+                    }
                 }
                 result
             }
+            }
+
+            // If the trailer pipeline already ran for this item without a hit and
+            // enrichment just brought localized YT ids, retry now using them as
+            // fallback. Mirrors the behaviour in HomeViewModelPresentationPipeline.
+            if (enrichment != null) {
+                val ytFallback = enrichment.trailers.mapNotNull { it.ytId }.firstOrNull()
+                if (ytFallback != null && !_trailerPreviewUrls.value.containsKey(item.id)) {
+                    trailerPreviewNegativeCache.remove(item.id)
+                    trailerPreviewLoadingIds.remove(item.id)
+                    if (activeTrailerPreviewItemId == item.id) trailerPreviewRequestVersion++
+                    val refreshedItem = _uiState.value.tabs
+                        .firstNotNullOfOrNull { tab ->
+                            tab.catalogRow?.items?.firstOrNull { it.id == item.id }
+                        }
+                    if (refreshedItem != null) {
+                        requestTrailerPreview(
+                            itemId = refreshedItem.id,
+                            title = refreshedItem.name,
+                            releaseInfo = refreshedItem.releaseInfo,
+                            apiType = refreshedItem.apiType,
+                            fallbackYtId = ytFallback
+                        )
+                    }
+                }
             }
 
             // External meta addon fallback when TMDB didn't enrich.
@@ -947,6 +1054,11 @@ class FolderDetailViewModel @Inject constructor(
                             releaseInfo = meta.releaseInfo?.takeIf { it.isNotBlank() } ?: merged.releaseInfo
                         )
                     }
+                } else {
+                    // External meta also failed — mark as failed enrichment.
+                    if (item.id !in _enrichedPreviews.value) {
+                        _failedEnrichmentIds.value = _failedEnrichmentIds.value + item.id
+                    }
                 }
             }
 
@@ -964,7 +1076,13 @@ class FolderDetailViewModel @Inject constructor(
         }
     }
 
-    fun requestTrailerPreview(itemId: String, title: String, releaseInfo: String?, apiType: String) {
+    fun requestTrailerPreview(
+        itemId: String,
+        title: String,
+        releaseInfo: String?,
+        apiType: String,
+        fallbackYtId: String? = null
+    ) {
         if (!AppFeaturePolicy.inAppTrailerPlaybackEnabled) return
         if (activeTrailerPreviewItemId != itemId) {
             activeTrailerPreviewItemId = itemId
@@ -991,13 +1109,27 @@ class FolderDetailViewModel @Inject constructor(
                 return@launch
             }
 
-            if (trailerSource?.videoUrl.isNullOrBlank()) {
+            // Prefer the localized YT id provided by the caller (typically TMDB
+            // enrichment trailers in the user locale) when the direct TMDB videos
+            // lookup didn't find anything for this language and we'd otherwise
+            // fall through to TMDB's en-US fallback.
+            val resolvedSource = if (trailerSource?.videoUrl.isNullOrBlank() && !fallbackYtId.isNullOrBlank()) {
+                trailerService.getTrailerPlaybackSourceFromYouTubeUrl(
+                    youtubeUrl = "https://www.youtube.com/watch?v=$fallbackYtId",
+                    title = title,
+                    year = extractYear(releaseInfo)
+                )
+            } else {
+                trailerSource
+            }
+
+            if (resolvedSource?.videoUrl.isNullOrBlank()) {
                 trailerPreviewNegativeCache.add(itemId)
                 _trailerPreviewUrls.update { it - itemId }
                 _trailerPreviewAudioUrls.update { it - itemId }
             } else {
-                _trailerPreviewUrls.update { it + (itemId to trailerSource.videoUrl) }
-                val audioUrl = trailerSource.audioUrl
+                _trailerPreviewUrls.update { it + (itemId to resolvedSource.videoUrl) }
+                val audioUrl = resolvedSource.audioUrl
                 if (audioUrl.isNullOrBlank()) {
                     _trailerPreviewAudioUrls.update { it - itemId }
                 } else {
@@ -1032,4 +1164,135 @@ class FolderDetailViewModel @Inject constructor(
         }
     }
 
+    fun scrollToTop() {
+        _scrollToTopTrigger.value++
+    }
+
+    /**
+     * Preloads enrichment data for an adjacent item (next item in the row) so that
+     * when the user navigates to it, the hero/backdrop data is already available.
+     * Mirrors HomeViewModel.preloadAdjacentItem behavior.
+     */
+    fun preloadAdjacentItem(item: MetaPreview) {
+        if (item.id in enrichedItemIds) return
+        if (item.id in prefetchedTmdbIds || item.id in prefetchedExternalMetaIds) return
+        if (pendingAdjacentPrefetchItemId == item.id) return
+
+        pendingAdjacentPrefetchItemId = item.id
+        adjacentItemPrefetchJob?.cancel()
+        adjacentItemPrefetchJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            kotlinx.coroutines.delay(600)
+            if (pendingAdjacentPrefetchItemId != item.id) return@launch
+            if (item.id in prefetchedTmdbIds || item.id in prefetchedExternalMetaIds) return@launch
+
+            val tmdbSettings = tmdbSettingsDataStore.settings.first()
+            val homeLayout = _uiState.value.homeLayout
+            val tmdbEnabled = tmdbSettings.enabled &&
+                (homeLayout != HomeLayout.MODERN || tmdbSettings.modernHomeEnabled)
+            val externalMetaEnabled = layoutPreferenceDataStore.preferExternalMetaAddonDetail.first()
+
+            if (!tmdbEnabled && !externalMetaEnabled) return@launch
+
+            try {
+                var tmdbEnriched = false
+                if (tmdbEnabled) {
+                    val tmdbId = runCatching { tmdbService.ensureTmdbId(item.id, item.apiType) }.getOrNull()
+                    if (tmdbId != null) {
+                        val enrichment = runCatching {
+                            tmdbMetadataService.fetchEnrichment(
+                                tmdbId = tmdbId,
+                                contentType = item.type,
+                                language = tmdbSettings.language
+                            )
+                        }.getOrNull()
+                        if (enrichment != null) {
+                            prefetchedTmdbIds.add(item.id)
+                            prefetchedExternalMetaIds.add(item.id)
+                            enrichedItemIds.add(item.id)
+                            updateItemInTabs(item.id) { merged ->
+                                var result = merged
+                                if (tmdbSettings.useBasicInfo) {
+                                    val isModern = _uiState.value.homeLayout == HomeLayout.MODERN
+                                    result = result.copy(
+                                        name = if (isModern) enrichment.localizedTitle ?: result.name else result.name,
+                                        description = enrichment.description ?: result.description,
+                                        genres = if (enrichment.genres.isNotEmpty()) enrichment.genres else result.genres
+                                    )
+                                }
+                                if (tmdbSettings.useArtwork) {
+                                    result = result.copy(
+                                        background = enrichment.backdrop ?: result.background,
+                                        logo = enrichment.logo ?: result.logo
+                                    )
+                                }
+                                if (tmdbSettings.useReleaseDates) {
+                                    result = result.copy(
+                                        releaseInfo = enrichment.releaseInfo ?: result.releaseInfo
+                                    )
+                                }
+                                if (tmdbSettings.useDetails) {
+                                    result = result.copy(
+                                        runtime = enrichment.runtimeMinutes?.toString() ?: result.runtime,
+                                        ageRating = enrichment.ageRating ?: result.ageRating,
+                                        status = enrichment.status ?: result.status
+                                    )
+                                }
+                                result
+                            }
+                            val enrichedItem = _uiState.value.tabs
+                                .firstNotNullOfOrNull { tab ->
+                                    tab.catalogRow?.items?.firstOrNull { it.id == item.id }
+                                }
+                            if (enrichedItem != null) {
+                                _enrichedPreviews.update { it + (item.id to enrichedItem) }
+                            }
+                            rebuildFollowLayoutState()
+                            tmdbEnriched = true
+                        }
+                    }
+                }
+                if (!tmdbEnriched && externalMetaEnabled && item.id !in prefetchedExternalMetaIds) {
+                    prefetchedExternalMetaIds.add(item.id)
+                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id)
+                        .first { it is com.nuvio.tv.core.network.NetworkResult.Success || it is com.nuvio.tv.core.network.NetworkResult.Error }
+                    if (result is com.nuvio.tv.core.network.NetworkResult.Success) {
+                        enrichedItemIds.add(item.id)
+                        val meta = result.data
+                        updateItemInTabs(item.id) { merged ->
+                            merged.copy(
+                                name = meta.name.takeIf { it.isNotBlank() } ?: merged.name,
+                                description = meta.description?.takeIf { it.isNotBlank() } ?: merged.description,
+                                background = meta.background?.takeIf { it.isNotBlank() } ?: merged.background,
+                                logo = meta.logo?.takeIf { it.isNotBlank() } ?: merged.logo,
+                                genres = meta.genres.takeIf { it.isNotEmpty() } ?: merged.genres,
+                                imdbRating = meta.imdbRating ?: merged.imdbRating,
+                                releaseInfo = meta.releaseInfo?.takeIf { it.isNotBlank() } ?: merged.releaseInfo
+                            )
+                        }
+                        val enrichedItem = _uiState.value.tabs
+                            .firstNotNullOfOrNull { tab ->
+                                tab.catalogRow?.items?.firstOrNull { it.id == item.id }
+                            }
+                        if (enrichedItem != null) {
+                            _enrichedPreviews.update { it + (item.id to enrichedItem) }
+                        }
+                        rebuildFollowLayoutState()
+                    }
+                }
+            } finally {
+                if (pendingAdjacentPrefetchItemId == item.id) {
+                    pendingAdjacentPrefetchItemId = null
+                }
+            }
+        }
+    }
+
+}
+
+/** Drops unreleased items from a freshly-loaded row when the user toggle is on. */
+private fun CatalogRow.filteredForRelease(hideUnreleased: Boolean): CatalogRow {
+    if (!hideUnreleased) return this
+    val today = java.time.LocalDate.now()
+    val filtered = items.filterNot { it.isUnreleased(today) }
+    return if (filtered.size == items.size) this else copy(items = filtered)
 }

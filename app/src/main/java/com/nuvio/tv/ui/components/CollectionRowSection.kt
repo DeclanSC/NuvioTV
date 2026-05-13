@@ -42,10 +42,13 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,6 +80,7 @@ fun CollectionRowSection(
     onFolderFocused: (collection: Collection, folder: CollectionFolder) -> Unit = { _, _ -> },
     entryFocusRequester: FocusRequester? = null
 ) {
+    val currentOnFolderClick by rememberUpdatedState(onFolderClick)
     val currentOnItemFocused by rememberUpdatedState(onItemFocused)
     val currentOnFolderFocused by rememberUpdatedState(onFolderFocused)
     val rowFocusRequester = remember { FocusRequester() }
@@ -180,13 +184,15 @@ fun CollectionRowSection(
                         folder = folder,
                         collection = collection,
                         posterCardStyle = posterCardStyle,
-                        onClick = { onFolderClick(collection.id, folder.id) },
-                        onFocused = {
-                            if (lastFocusedItemIndex != index) {
-                                lastFocusedItemIndex = index
-                                currentOnItemFocused(index)
+                        onClick = remember(collection.id, folder.id) { { currentOnFolderClick(collection.id, folder.id) } },
+                        onFocused = remember(index, folder.id) {
+                            {
+                                if (lastFocusedItemIndex != index) {
+                                    lastFocusedItemIndex = index
+                                    currentOnItemFocused(index)
+                                }
+                                currentOnFolderFocused(collection, folder)
                             }
-                            currentOnFolderFocused(collection, folder)
                         },
                         modifier = if (isEntryTarget) Modifier.focusRequester(entryFocusRequester!!) else Modifier,
                         focusRequester = itemFocusRequesters.getOrPut(
@@ -282,6 +288,27 @@ private fun FolderCard(
                         color = NuvioColors.TextSecondary
                     )
                 }
+            }
+
+            // GIF overlay: show on top of cover image or emoji, visible only once loaded
+            val focusGifUrl = if (isFocused && folder.focusGifEnabled) folder.focusGifUrl else null
+            if (!focusGifUrl.isNullOrBlank()) {
+                var gifLoaded by remember(focusGifUrl) { mutableStateOf(false) }
+                val gifAlpha by animateFloatAsState(
+                    targetValue = if (gifLoaded) 1f else 0f,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "gifFadeIn"
+                )
+                AsyncImage(
+                    model = focusGifUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(shape)
+                        .graphicsLayer { alpha = gifAlpha },
+                    contentScale = ContentScale.FillBounds,
+                    onSuccess = { gifLoaded = true }
+                )
             }
 
             if (!folder.hideTitle) {

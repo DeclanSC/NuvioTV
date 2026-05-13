@@ -47,6 +47,7 @@ class ProfileSyncService @Inject constructor(
             val profiles = profileManager.profiles.value
 
             val params = buildJsonObject {
+                put("p_client_max_profiles", ProfileManager.MAX_PROFILES)
                 put("p_profiles", buildJsonArray {
                     profiles.forEach { profile ->
                         addJsonObject {
@@ -55,7 +56,8 @@ class ProfileSyncService @Inject constructor(
                             put("avatar_color_hex", profile.avatarColorHex)
                             put("uses_primary_addons", profile.usesPrimaryAddons)
                             put("uses_primary_plugins", profile.usesPrimaryPlugins)
-                            put("avatar_id", profile.avatarId)
+                            put("avatar_id", if (profile.avatarUrl.isNullOrBlank()) profile.avatarId else null)
+                            put("avatar_url", profile.avatarUrl?.takeIf { it.isNotBlank() })
                         }
                     }
                 })
@@ -88,7 +90,8 @@ class ProfileSyncService @Inject constructor(
                     avatarColorHex = entry.avatarColorHex,
                     usesPrimaryAddons = entry.usesPrimaryAddons,
                     usesPrimaryPlugins = entry.usesPrimaryPlugins,
-                    avatarId = entry.avatarId
+                    avatarId = entry.avatarId,
+                    avatarUrl = entry.avatarUrl
                 )
             }
 

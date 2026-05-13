@@ -1,12 +1,15 @@
 package com.nuvio.tv.ui.screens.collection
 
+import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nuvio.tv.R
 import com.nuvio.tv.core.sync.CollectionSyncService
 import com.nuvio.tv.core.tmdb.TmdbCollectionSourceResolver
 import com.nuvio.tv.core.trakt.TraktPublicListSearchResult
 import com.nuvio.tv.core.trakt.TraktPublicListSourceResolver
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.nuvio.tv.data.remote.api.TmdbCollectionSearchResult
 import com.nuvio.tv.data.remote.api.TmdbCompanySearchResult
 import com.nuvio.tv.data.local.CollectionsDataStore
@@ -91,6 +94,8 @@ enum class TmdbBuilderMode {
     PRODUCTION,
     NETWORK,
     COLLECTION,
+    PERSON,
+    DIRECTOR,
     DISCOVER
 }
 
@@ -101,6 +106,7 @@ data class TmdbPresetSource(
 
 @HiltViewModel
 class CollectionEditorViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     savedStateHandle: SavedStateHandle,
     private val collectionsDataStore: CollectionsDataStore,
     private val addonRepository: AddonRepository,
@@ -117,6 +123,8 @@ class CollectionEditorViewModel @Inject constructor(
     init {
         loadData()
     }
+
+    private fun string(resId: Int): String = appContext.getString(resId)
 
     private fun loadData() {
         viewModelScope.launch {
@@ -517,7 +525,7 @@ class CollectionEditorViewModel @Inject constructor(
         val state = _uiState.value
         val query = state.traktInput.trim()
         if (query.isBlank()) {
-            _uiState.update { it.copy(traktSearchError = "Enter a Trakt list name, URL, or ID") }
+            _uiState.update { it.copy(traktSearchError = string(R.string.collections_editor_error_trakt_list_name_id_or_url)) }
             return
         }
         viewModelScope.launch {
@@ -525,12 +533,12 @@ class CollectionEditorViewModel @Inject constructor(
             val results = if (query.isTraktListIdentifierInput()) {
                 runCatching {
                     val metadata = traktPublicListSourceResolver.listImportMetadata(query)
-                    val id = metadata.traktListId ?: error("Could not load Trakt list")
+                    val id = metadata.traktListId ?: error(string(R.string.collections_editor_error_load_trakt_list))
                     listOf(
                         TraktPublicListSearchResult(
                             traktListId = id,
-                            title = metadata.title ?: "Trakt List $id",
-                            subtitle = "Resolved Trakt list",
+                            title = metadata.title ?: "${string(R.string.collections_editor_trakt_list)} $id",
+                            subtitle = appContext.getString(R.string.collection_editor_resolved_trakt_list),
                             coverImageUrl = metadata.coverImageUrl
                         )
                     )
@@ -543,7 +551,7 @@ class CollectionEditorViewModel @Inject constructor(
                 it.copy(
                     traktSearchResults = mapped,
                     traktSearchError = results.exceptionOrNull()?.message
-                        ?: if (mapped.isEmpty()) "No Trakt lists found" else null
+                        ?: if (mapped.isEmpty()) string(R.string.collection_editor_no_trakt_lists_found) else null
                 )
             }
         }
@@ -745,11 +753,13 @@ class CollectionEditorViewModel @Inject constructor(
         val id = tmdbCollectionSourceResolver.parseTmdbId(state.tmdbInput)
         val title = state.tmdbTitleInput.ifBlank {
             when (mode) {
-                TmdbBuilderMode.LIST -> "TMDB List ${id ?: ""}".trim()
-                TmdbBuilderMode.NETWORK -> "TMDB Network ${id ?: ""}".trim()
-                TmdbBuilderMode.COLLECTION -> "TMDB Collection ${id ?: ""}".trim()
-                TmdbBuilderMode.PRODUCTION -> "TMDB Production ${id ?: ""}".trim()
-                else -> "TMDB Discover"
+                TmdbBuilderMode.LIST -> "${string(R.string.collections_editor_tmdb_default_list)} ${id ?: ""}".trim()
+                TmdbBuilderMode.NETWORK -> "${string(R.string.collections_editor_tmdb_default_network)} ${id ?: ""}".trim()
+                TmdbBuilderMode.COLLECTION -> "${string(R.string.collections_editor_tmdb_collection)} ${id ?: ""}".trim()
+                TmdbBuilderMode.PRODUCTION -> "${string(R.string.collections_editor_tmdb_default_production)} ${id ?: ""}".trim()
+                TmdbBuilderMode.PERSON -> "${string(R.string.collections_editor_tmdb_person_credits)} ${id ?: ""}".trim()
+                TmdbBuilderMode.DIRECTOR -> "${string(R.string.collections_editor_tmdb_director_credits)} ${id ?: ""}".trim()
+                else -> string(R.string.collections_editor_tmdb_default_discover)
             }
         }
         val sourceType = when (mode) {
@@ -757,10 +767,12 @@ class CollectionEditorViewModel @Inject constructor(
             TmdbBuilderMode.NETWORK -> TmdbCollectionSourceType.NETWORK
             TmdbBuilderMode.COLLECTION -> TmdbCollectionSourceType.COLLECTION
             TmdbBuilderMode.PRODUCTION -> TmdbCollectionSourceType.COMPANY
+            TmdbBuilderMode.PERSON -> TmdbCollectionSourceType.PERSON
+            TmdbBuilderMode.DIRECTOR -> TmdbCollectionSourceType.DIRECTOR
             else -> TmdbCollectionSourceType.DISCOVER
         }
         if (sourceType != TmdbCollectionSourceType.DISCOVER && id == null) {
-            _uiState.update { it.copy(tmdbSearchError = "Enter a valid TMDB ID or URL") }
+            _uiState.update { it.copy(tmdbSearchError = string(R.string.collections_editor_error_valid_tmdb_id_or_url)) }
             return
         }
         val mediaType = when (sourceType) {
@@ -784,7 +796,12 @@ class CollectionEditorViewModel @Inject constructor(
                 }
                 val resolved = metadata.getOrNull()
                 if (metadata.isFailure) {
-                    _uiState.update { it.copy(tmdbSearchError = metadata.exceptionOrNull()?.message ?: "Could not load TMDB source") }
+                    _uiState.update {
+                        it.copy(
+                            tmdbSearchError = metadata.exceptionOrNull()?.message
+                                ?: string(R.string.collections_editor_error_load_tmdb_source)
+                        )
+                    }
                     return@launch
                 }
                 addTmdbSourceToFolder(
@@ -801,36 +818,23 @@ class CollectionEditorViewModel @Inject constructor(
             }
             return
         }
-        if (mediaTypes.size > 1) {
-            addTmdbSourcesToFolder(
-                mediaTypes.map { type ->
-                    TmdbCollectionSource(
-                        sourceType = sourceType,
-                        title = titleForMedia(title, type, addSuffix = true),
-                        tmdbId = id,
-                        mediaType = type,
-                        sortBy = state.tmdbSortBy,
-                        filters = state.tmdbFilters
-                    )
-                }
-            )
-        } else {
-            addTmdbSourceToFolder(
+        addTmdbSources(
+            mediaTypes.map { type ->
                 TmdbCollectionSource(
                     sourceType = sourceType,
-                    title = title,
+                    title = titleForMedia(title, type, addSuffix = mediaTypes.size > 1),
                     tmdbId = id,
-                    mediaType = mediaType,
+                    mediaType = type,
                     sortBy = state.tmdbSortBy,
                     filters = state.tmdbFilters
                 )
-            )
-        }
+            }
+        )
     }
 
     fun addDiscoverSource() {
         val state = _uiState.value
-        val baseTitle = state.tmdbTitleInput.ifBlank { "TMDB Discover" }
+        val baseTitle = state.tmdbTitleInput.ifBlank { string(R.string.collections_editor_tmdb_default_discover) }
         val mediaTypes = selectedMediaTypes(state, TmdbCollectionSourceType.DISCOVER)
         addTmdbSourcesToFolder(
             mediaTypes.map { mediaType ->
@@ -848,17 +852,24 @@ class CollectionEditorViewModel @Inject constructor(
     fun addTraktSourceFromInput() {
         val state = _uiState.value
         if (state.traktInput.isBlank()) {
-            _uiState.update { it.copy(traktSearchError = "Enter a Trakt list ID or URL") }
+            _uiState.update { it.copy(traktSearchError = string(R.string.collections_editor_error_trakt_list_id_or_url)) }
             return
         }
         viewModelScope.launch {
             val metadata = runCatching { traktPublicListSourceResolver.listImportMetadata(state.traktInput) }
             val resolved = metadata.getOrNull()
             if (metadata.isFailure || resolved?.traktListId == null) {
-                _uiState.update { it.copy(traktSearchError = metadata.exceptionOrNull()?.message ?: "Could not load Trakt list") }
+                _uiState.update {
+                    it.copy(
+                        traktSearchError = metadata.exceptionOrNull()?.message
+                            ?: string(R.string.collections_editor_error_load_trakt_list)
+                    )
+                }
                 return@launch
             }
-            val title = state.traktTitleInput.ifBlank { resolved.title ?: "Trakt List ${resolved.traktListId}" }
+            val title = state.traktTitleInput.ifBlank {
+                resolved.title ?: "${string(R.string.collections_editor_trakt_list)} ${resolved.traktListId}"
+            }
             addTraktSourcesToFolder(
                 selectedTraktMediaTypes(state).map { mediaType ->
                     TraktCollectionSource(
@@ -964,8 +975,8 @@ class CollectionEditorViewModel @Inject constructor(
     private fun titleForMedia(title: String, mediaType: TmdbCollectionMediaType, addSuffix: Boolean): String {
         if (!addSuffix) return title
         val suffix = when (mediaType) {
-            TmdbCollectionMediaType.MOVIE -> "Movies"
-            TmdbCollectionMediaType.TV -> "Series"
+            TmdbCollectionMediaType.MOVIE -> string(R.string.type_movies)
+            TmdbCollectionMediaType.TV -> string(R.string.type_series_plural)
         }
         return "$title $suffix"
     }
@@ -976,8 +987,8 @@ class CollectionEditorViewModel @Inject constructor(
             TmdbCollectionSourceType.COLLECTION -> TmdbBuilderMode.COLLECTION
             TmdbCollectionSourceType.COMPANY -> TmdbBuilderMode.PRODUCTION
             TmdbCollectionSourceType.NETWORK -> TmdbBuilderMode.NETWORK
-            TmdbCollectionSourceType.PERSON,
-            TmdbCollectionSourceType.DIRECTOR,
+            TmdbCollectionSourceType.PERSON -> TmdbBuilderMode.PERSON
+            TmdbCollectionSourceType.DIRECTOR -> TmdbBuilderMode.DIRECTOR
             TmdbCollectionSourceType.DISCOVER -> TmdbBuilderMode.DISCOVER
         }
     }
@@ -1051,7 +1062,7 @@ class CollectionEditorViewModel @Inject constructor(
         val rawFolder = _uiState.value.editingFolder ?: return
         if (rawFolder.sources.isEmpty()) return
         val cleanedFolder = rawFolder.copy(
-            title = rawFolder.title.ifBlank { "Untitled" },
+            title = rawFolder.title.ifBlank { string(R.string.collection_editor_untitled_folder) },
             coverImageUrl = rawFolder.coverImageUrl?.ifBlank { null },
             heroBackdropUrl = rawFolder.heroBackdropUrl?.ifBlank { null },
             heroVideoUrl = rawFolder.heroVideoUrl?.ifBlank { null },
@@ -1098,7 +1109,7 @@ class CollectionEditorViewModel @Inject constructor(
         viewModelScope.launch {
             val collection = Collection(
                 id = state.collectionId,
-                title = state.title.ifBlank { "Untitled Collection" },
+                title = state.title.ifBlank { string(R.string.collection_editor_untitled_collection) },
                 backdropImageUrl = state.backdropImageUrl.ifBlank { null },
                 pinToTop = state.pinToTop,
                 focusGlowEnabled = state.focusGlowEnabled,

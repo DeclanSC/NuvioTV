@@ -24,6 +24,7 @@ import com.nuvio.tv.domain.model.Addon
 import com.nuvio.tv.domain.model.CatalogDescriptor
 import com.nuvio.tv.domain.model.CatalogRow
 import com.nuvio.tv.domain.model.Collection
+import com.nuvio.tv.domain.model.ContinueWatchingSortMode
 import com.nuvio.tv.domain.model.LibraryEntryInput
 import com.nuvio.tv.domain.model.Meta
 import com.nuvio.tv.domain.model.MetaPreview
@@ -41,6 +42,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -88,7 +90,7 @@ class HomeViewModel @Inject constructor(
         private const val MAX_CATALOG_LOAD_CONCURRENCY = 8
         internal const val EXTERNAL_META_PREFETCH_FOCUS_DEBOUNCE_MS = 220L
         internal const val EXTERNAL_META_PREFETCH_ADJACENT_DEBOUNCE_MS = 120L
-        internal const val MAX_POSTER_STATUS_OBSERVERS = 24
+        internal const val MAX_POSTER_STATUS_OBSERVERS = 8
     }
 
     internal val _uiState = MutableStateFlow(HomeUiState())
@@ -139,6 +141,10 @@ class HomeViewModel @Inject constructor(
     internal val _enrichedPreviews = MutableStateFlow<Map<String, MetaPreview>>(emptyMap())
     val enrichedPreviews: StateFlow<Map<String, MetaPreview>> = _enrichedPreviews.asStateFlow()
 
+    /** Items for which enrichment was attempted but produced no enriched data. */
+    internal val _failedEnrichmentIds = MutableStateFlow<Set<String>>(emptySet())
+    val failedEnrichmentIds: StateFlow<Set<String>> = _failedEnrichmentIds.asStateFlow()
+
     internal val catalogStateLock = Any()
     internal val catalogsMap = linkedMapOf<String, CatalogRow>()
     internal val catalogItemKeyIndex = mutableMapOf<String, MutableSet<String>>()
@@ -169,6 +175,7 @@ class HomeViewModel @Inject constructor(
     internal val trailerPreviewAudioUrlsState = mutableStateMapOf<String, String>()
     internal var activeTrailerPreviewItemId: String? = null
     internal var trailerPreviewRequestVersion: Long = 0L
+    internal var trailerPreviewJob: Job? = null
     internal var currentTmdbSettings: TmdbSettings = TmdbSettings()
     internal var currentMdbListSettings: MDBListSettings = MDBListSettings()
     internal var heroEnrichmentJob: Job? = null
@@ -217,6 +224,8 @@ class HomeViewModel @Inject constructor(
     internal var posterStatusObservationEnabled: Boolean = false
     @Volatile
     internal var externalMetaPrefetchEnabled: Boolean = false
+    @Volatile
+    internal var continueWatchingSortMode: ContinueWatchingSortMode = ContinueWatchingSortMode.DEFAULT
     internal val startupStartedAtMs: Long = SystemClock.elapsedRealtime()
     @Volatile
     internal var startupGracePeriodActive: Boolean = true
@@ -247,10 +256,12 @@ class HomeViewModel @Inject constructor(
         observeStartupAuthNotice()
         viewModelScope.launch {
             profileManager.activeProfileReady.first { it }
-            watchedSeriesStateHolder.loadFromDisk()
             observeLayoutPreferences()
             observeModernHomePresentation()
+            loadContinueWatching()
+            watchedSeriesStateHolder.loadFromDisk()
             observeExternalMetaPrefetchPreference()
+            observeContinueWatchingSortMode()
             loadHomeCatalogOrderPreference()
             loadFollowAddonsOrder()
             loadDisabledHomeCatalogPreference()
@@ -261,7 +272,6 @@ class HomeViewModel @Inject constructor(
             observeBlurUnwatchedEpisodes()
             observeMemoryOnlyVerticalScroll()
             observeProgressSourceChanges()
-            loadContinueWatching()
             observeCollections()
             observeInstalledAddons()
 
@@ -288,10 +298,7 @@ class HomeViewModel @Inject constructor(
                     cwEnrichedInProgressOverlay.clear()
                     cwLastBadgeEpisodeKeys = emptySet()
                     _uiState.update {
-                        it.copy(
-                            continueWatchingItems = emptyList(),
-                            layoutPreferencesReady = false
-                        )
+                        it.copy(layoutPreferencesReady = false)
                     }
                     // Reset so the new profile's pipeline signals first completion correctly.
                     _initialCwResolved.value = false
@@ -355,6 +362,23 @@ class HomeViewModel @Inject constructor(
     private fun observeModernHomePresentation() = observeModernHomePresentationPipeline()
 
     private fun observeExternalMetaPrefetchPreference() = observeExternalMetaPrefetchPreferencePipeline()
+
+    private fun observeContinueWatchingSortMode() {
+        viewModelScope.launch {
+            var initial = true
+            layoutPreferenceDataStore.continueWatchingSortMode
+                .distinctUntilChanged()
+                .collect { mode ->
+                    continueWatchingSortMode = mode
+                    if (initial) {
+                        initial = false
+                        return@collect
+                    }
+                    // Clear caches so the new sort is applied immediately on next pipeline run
+                    clearAllCwInMemoryCaches()
+                }
+        }
+    }
 
     private fun observeBlurUnwatchedEpisodes() {
         viewModelScope.launch {
@@ -452,7 +476,6 @@ class HomeViewModel @Inject constructor(
                         cwEnrichedInProgressOverlay.clear()
                         discoveredOlderNextUpItems.clear()
                         cwLastProcessedNextUpContentIds.clear()
-                        _uiState.update { it.copy(continueWatchingItems = emptyList()) }
                         // Clear disk cache for current profile.
                         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                             runCatching { cwEnrichmentCache.saveNextUpSnapshot(emptyList(), force = true) }
@@ -579,14 +602,11 @@ class HomeViewModel @Inject constructor(
             }
             val items = mergeContinueWatchingItems(
                 inProgressItems = inProgressItems,
-                nextUpItems = nextUpItems
+                nextUpItems = nextUpItems,
+                mode = layoutPreferenceDataStore.continueWatchingSortMode.first()
             )
             if (items.isNotEmpty()) {
-                _uiState.update { state ->
-                    if (state.continueWatchingItems.isEmpty()) {
-                        state.copy(continueWatchingItems = items)
-                    } else state
-                }
+                _uiState.update { it.copy(continueWatchingItems = items) }
                 _initialCwResolved.value = true
             }
         }
@@ -652,6 +672,27 @@ class HomeViewModel @Inject constructor(
         loadCatalogPipeline(addon, catalog, generation)
     }
 
+    /**
+     * Load all pending lazy catalogs at once. Used when switching to GRID layout
+     * which needs all catalogs available upfront.
+     */
+    internal fun loadAllPendingLazyCatalogs() {
+        val pending = synchronized(catalogStateLock) {
+            val copy = pendingLazyCatalogs.toMap()
+            pendingLazyCatalogs.clear()
+            copy
+        }
+        if (pending.isEmpty()) return
+        val generation = catalogLoadGeneration
+        pending.forEach { (key, pair) ->
+            if (lazyLoadRequestedKeys.add(key)) {
+                val (addon, catalog) = pair
+                pendingCatalogLoads = (pendingCatalogLoads + 1)
+                loadCatalogPipeline(addon, catalog, generation)
+            }
+        }
+    }
+
     private suspend fun updateCatalogRows() = updateCatalogRowsPipeline()
 
     internal var posterStatusReconcileJob: Job? = null
@@ -690,24 +731,49 @@ class HomeViewModel @Inject constructor(
     fun saveFocusState(
         verticalScrollIndex: Int,
         verticalScrollOffset: Int,
-        focusedRowIndex: Int,
-        focusedItemIndex: Int,
-        catalogRowScrollStates: Map<String, Int>
+        focusedRowKey: String?,
+        focusedItemKeyByRow: Map<String, String>,
+        catalogRowScrollStates: Map<String, Int>,
+        focusedRowIndex: Int = 0,
+        focusedItemIndex: Int = 0
     ) {
         if (suppressFocusSave) {
             suppressFocusSave = false
             return
         }
-        val nextState = HomeScreenFocusState(
+        val nextState = _focusState.value.copy(
             verticalScrollIndex = verticalScrollIndex,
             verticalScrollOffset = verticalScrollOffset,
+            focusedRowKey = focusedRowKey,
+            focusedItemKeyByRow = focusedItemKeyByRow,
+            catalogRowScrollStates = catalogRowScrollStates,
             focusedRowIndex = focusedRowIndex,
             focusedItemIndex = focusedItemIndex,
-            catalogRowScrollStates = catalogRowScrollStates,
             hasSavedFocus = true
         )
         if (_focusState.value == nextState) return
         _focusState.value = nextState
+    }
+
+    /**
+     * Updates the stable focus target for a specific row.
+     */
+    fun updateFocusedItemKey(rowKey: String, itemKey: String) {
+        _focusState.update { state ->
+            val nextMap = state.focusedItemKeyByRow.toMutableMap()
+            if (nextMap[rowKey] == itemKey) return@update state
+            nextMap[rowKey] = itemKey
+            state.copy(focusedItemKeyByRow = nextMap)
+        }
+    }
+
+    /**
+     * Updates the currently focused row key.
+     */
+    fun updateFocusedRowKey(rowKey: String?) {
+        _focusState.update { state ->
+            if (state.focusedRowKey == rowKey) state else state.copy(focusedRowKey = rowKey)
+        }
     }
 
     /**

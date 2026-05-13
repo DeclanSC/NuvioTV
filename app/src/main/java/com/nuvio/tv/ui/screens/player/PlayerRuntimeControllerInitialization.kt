@@ -51,6 +51,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private const val STARTUP_SUBTITLE_PREFETCH_TIMEOUT_MS = 20_000L
 private const val MPV_AFR_SETTLE_DELAY_MS = 2_000L
+private const val AUDIO_DELAY_REFRESH_DEBOUNCE_MS = 120L
+private const val PLAYER_RELEASE_TIMEOUT_MS = 3000L
+private const val PLAYER_REBUILD_SETTLE_DELAY_MS = 120L
 
 internal data class StartupSubtitlePreparation(
     val fetchedSubtitles: List<Subtitle>,
@@ -81,6 +84,25 @@ private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
     )
 }
 
+private fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild() {
+    notifyAudioSessionUpdate(false)
+    try {
+        currentMediaSession?.release()
+        currentMediaSession = null
+    } catch (_: Exception) {
+    }
+    _exoPlayer?.let { player ->
+        runCatching { player.playWhenReady = false }
+        runCatching { player.pause() }
+        runCatching { player.stop() }
+        runCatching { player.clearMediaItems() }
+        runCatching { player.clearVideoSurface() }
+        runCatching { player.release() }
+    }
+    _exoPlayer = null
+    playbackSpeedAwareAudioSink = null
+}
+
 @androidx.annotation.OptIn(UnstableApi::class)
 internal fun PlayerRuntimeController.initializePlayer(
     url: String,
@@ -94,7 +116,8 @@ internal fun PlayerRuntimeController.initializePlayer(
         return
     }
 
-    scope.launch {
+    playerInitializationJob?.cancel()
+    playerInitializationJob = scope.launch {
         try {
             if (allowEngineFailover) {
                 startupEngineFailoverTriggered = false
@@ -104,8 +127,13 @@ internal fun PlayerRuntimeController.initializePlayer(
                 userPausedManually = true
                 shouldEnforceAutoplayOnFirstReady = false
             }
-            hasTriedAudioPcmFallback = false
+            val applyPcmFallbackOnStartup = pendingAudioPcmFallbackRebuild
+            val applyDv7FallbackOnStartup = forceDv7ToHevc
+            if (!applyPcmFallbackOnStartup) {
+                hasTriedAudioPcmFallback = false
+            }
             hasTriedDv7HevcFallback = false
+            forceDv7ToHevc = false
             mpvDelayStartAfterAfrSwitch = false
             val playerSettings = playerSettingsDataStore.playerSettings.first()
             rememberAudioDelayPerDeviceEnabled = playerSettings.rememberAudioDelayPerDevice
@@ -124,17 +152,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             mpvHardwareDecodeModeSetting = playerSettings.mpvHardwareDecodeMode
             var effectiveInternalPlayerEngine = overrideInternalPlayerEngine ?: playerSettings.internalPlayerEngine
             if (effectiveInternalPlayerEngine == InternalPlayerEngine.AUTO) {
-                val hasAnimeGenre = metaGenres.any { it.equals("anime", ignoreCase = true) }
-                val isAnimationFromJapan = (metaGenres.any { it.equals("animation", ignoreCase = true) } &&
-                        metaCountry?.contains("Japan", ignoreCase = true) == true)
-                val hasAnimeId = currentVideoId?.startsWith("kitsu:") == true ||
-                        currentVideoId?.startsWith("mal:") == true ||
-                        currentVideoId?.startsWith("anilist:") == true
-
-                // AIOMetadata usually matches hasAnimeGenre or hasAnimeId, Cinemeta usually matches isAnimationFromJapan
-                val isAnime = hasAnimeGenre || hasAnimeId || isAnimationFromJapan
-
-                effectiveInternalPlayerEngine = if (isAnime) InternalPlayerEngine.MVP_PLAYER else InternalPlayerEngine.EXOPLAYER
+                effectiveInternalPlayerEngine = resolveAutoInternalPlayerEngine()
             }
             runtimeInternalPlayerEngineOverride = overrideInternalPlayerEngine
             if (overrideInternalPlayerEngine == null && playerSettings.internalPlayerEngine == InternalPlayerEngine.AUTO) {
@@ -276,7 +294,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 onPlaybackSpeedAwareAudioSinkCreated = { playbackSpeedAwareAudioSink = it }
             ).setExtensionRendererMode(playerSettings.decoderPriority)
-                .setMapDV7ToHevc(playerSettings.mapDV7ToHevc || forceDv7ToHevc)
+                .setMapDV7ToHevc(playerSettings.mapDV7ToHevc || applyDv7FallbackOnStartup)
 
             if (showLoadingStatus) _uiState.update { it.copy(loadingMessage = context.getString(R.string.player_loading_building)) }
             val buildDefaultPlayer = {
@@ -290,10 +308,13 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory, extractorsFactory))
                     .setRenderersFactory(renderersFactory)
                     .setLoadControl(loadControl)
-                    .setReleaseTimeoutMs(3000)
+                    .setReleaseTimeoutMs(PLAYER_RELEASE_TIMEOUT_MS)
                     .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
                     .build()
             }
+
+            disposeExoPlayerBeforeRebuild()
+            delay(PLAYER_REBUILD_SETTLE_DELAY_MS)
 
             _exoPlayer = if (useLibass) {
                 val playerDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, headers)
@@ -301,7 +322,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .setLoadControl(loadControl)
                     .setTrackSelector(trackSelector!!)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory, extractorsFactory))
-                    .setReleaseTimeoutMs(3000)
+                    .setReleaseTimeoutMs(PLAYER_RELEASE_TIMEOUT_MS)
                     .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
                     .buildWithAssSupportCompat(
                         context = context,
@@ -324,7 +345,16 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                     .build()
                 setAudioAttributes(audioAttributes, true)
-                setPlaybackSpeed(_uiState.value.playbackSpeed)
+                val startupSpeed = if ((applyPcmFallbackOnStartup || hasTriedAudioPcmFallback) && _uiState.value.playbackSpeed == 1f) {
+                    1.00001f
+                } else {
+                    _uiState.value.playbackSpeed
+                }
+                setPlaybackSpeed(startupSpeed)
+                if (applyPcmFallbackOnStartup) {
+                    pendingAudioPcmFallbackRebuild = false
+                    hasTriedAudioPcmFallback = true
+                }
 
                 
                 if (playerSettings.skipSilence) {
@@ -373,6 +403,21 @@ internal fun PlayerRuntimeController.initializePlayer(
                 prepare()
 
                 addListener(object : Player.Listener {
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int
+                    ) {
+                        if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                            if (playbackState == Player.STATE_READY) {
+                                // In-buffer seek: player is already ready, flush immediately
+                            } else {
+                                // Out-of-buffer seek: wait for STATE_READY
+                                pendingSeekFlush = true
+                            }
+                        }
+                    }
+
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         val playerDuration = duration
                         if (playerDuration > lastKnownDuration) {
@@ -397,16 +442,19 @@ internal fun PlayerRuntimeController.initializePlayer(
                             }
                         }
                     
-                        
                         if (playbackState == Player.STATE_READY) {
+                            pendingSeekFlush = false
+                            
+                            // Perform hardware flush (pause-delay-play) to prevent A/V desync 
+                            // on initial load, after rebuffering, and after out-of-buffer seeks.
                             if (shouldEnforceAutoplayOnFirstReady) {
                                 shouldEnforceAutoplayOnFirstReady = false
-                                if (!userPausedManually && !isPlaying) {
-                                    if (!playWhenReady) {
-                                        playWhenReady = true
-                                    }
+                                if (!userPausedManually) {
+                                    playWhenReady = true
                                     play()
                                 }
+                            } else if (!userPausedManually) {
+                                play()
                             }
                             tryApplyPendingResumeProgress(this@apply)
                             _uiState.value.pendingSeekPosition?.let { position ->
@@ -423,7 +471,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                         if (playbackState == Player.STATE_ENDED) {
                             emitCompletionScrobbleStop(progressPercent = 99.5f)
                             saveWatchProgress()
-                            resetNextEpisodeCardState(clearEpisode = false)
+                            resetPostPlayStateAfterPlaybackEnded()
                         }
                     }
 
@@ -482,7 +530,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                         if (isReleasingPlayer && error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) {
                             return
                         }
-                        val detailedError = error.toDisplayMessage()
+                        val detailedError = error.toDisplayMessage(context)
 
                         // If the codec crashed while the app is in the background (e.g. another
                         // app reclaimed the hardware decoder), don't run the retry chain — each
@@ -540,7 +588,7 @@ internal fun PlayerRuntimeController.initializePlayer(
         } catch (e: Exception) {
             if (
                 maybeAutoSwitchInternalPlayerOnStartupError(
-                    detailedError = e.message ?: "Failed to initialize player",
+                    detailedError = e.message ?: context.getString(com.nuvio.tv.R.string.player_error_initialize_failed),
                     allowEngineFailover = allowEngineFailover
                 )
             ) {
@@ -548,11 +596,37 @@ internal fun PlayerRuntimeController.initializePlayer(
             }
             _uiState.update {
                 it.copy(
-                    error = e.toDisplayMessage("Failed to initialize player"),
+                    error = e.toDisplayMessage(context, context.getString(com.nuvio.tv.R.string.player_error_initialize_failed)),
                     showLoadingOverlay = false
                 )
             }
         }
+    }
+}
+
+internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): InternalPlayerEngine {
+    val streamMetadataText = buildString {
+        currentFilename?.let { appendLine(it) }
+        streamName?.let { appendLine(it) }
+        currentStreamDescription?.let { appendLine(it) }
+        append(title)
+    }
+    val isHdrOrDv = Regex("""(?i)\b(hdr|hdr10\+?|dv|dolby\s*vision)\b""").containsMatchIn(streamMetadataText)
+
+    return if (isHdrOrDv) {
+        InternalPlayerEngine.EXOPLAYER
+    } else {
+        val hasAnimeGenre = metaGenres.any { it.equals("anime", ignoreCase = true) }
+        val isAnimationFromJapan = (metaGenres.any { it.equals("animation", ignoreCase = true) } &&
+                metaCountry?.contains("Japan", ignoreCase = true) == true)
+        val hasAnimeId = currentVideoId?.startsWith("kitsu:") == true ||
+                currentVideoId?.startsWith("mal:") == true ||
+                currentVideoId?.startsWith("anilist:") == true
+
+        // AIOMetadata usually matches hasAnimeGenre or hasAnimeId, Cinemeta usually matches isAnimationFromJapan
+        val isAnime = hasAnimeGenre || hasAnimeId || isAnimationFromJapan
+
+        if (isAnime) InternalPlayerEngine.MVP_PLAYER else InternalPlayerEngine.EXOPLAYER
     }
 }
 
@@ -621,9 +695,16 @@ internal suspend fun PlayerRuntimeController.prepareStartupSubtitles(
     mode: AddonSubtitleStartupMode,
     preferredLanguage: String,
     secondaryLanguage: String?,
+    showOnlyPreferredLanguages: Boolean = false,
     showLoadingStatus: Boolean = true
 ): StartupSubtitlePreparation {
-    if (mode == AddonSubtitleStartupMode.FAST_STARTUP) {
+    val effectiveMode = if (showOnlyPreferredLanguages && mode == AddonSubtitleStartupMode.ALL_SUBTITLES) {
+        AddonSubtitleStartupMode.PREFERRED_ONLY
+    } else {
+        mode
+    }
+
+    if (effectiveMode == AddonSubtitleStartupMode.FAST_STARTUP) {
         return StartupSubtitlePreparation(
             fetchedSubtitles = emptyList(),
             attachedSubtitles = emptyList(),
@@ -651,7 +732,7 @@ internal suspend fun PlayerRuntimeController.prepareStartupSubtitles(
     }.map { PlayerSubtitleUtils.normalizeLanguageCode(it) }
         .distinct()
 
-    if (mode == AddonSubtitleStartupMode.PREFERRED_ONLY && preferredTargets.isEmpty()) {
+    if (effectiveMode == AddonSubtitleStartupMode.PREFERRED_ONLY && preferredTargets.isEmpty()) {
         return StartupSubtitlePreparation(
             fetchedSubtitles = emptyList(),
             attachedSubtitles = emptyList(),
@@ -680,7 +761,7 @@ internal suspend fun PlayerRuntimeController.prepareStartupSubtitles(
         fetchCompleted = false
     )
 
-    val attachedSubtitles = when (mode) {
+    val attachedSubtitles = when (effectiveMode) {
         AddonSubtitleStartupMode.ALL_SUBTITLES -> fetchedSubtitles
         AddonSubtitleStartupMode.PREFERRED_ONLY -> fetchedSubtitles.filter { subtitle ->
             preferredTargets.any { target ->
@@ -690,8 +771,10 @@ internal suspend fun PlayerRuntimeController.prepareStartupSubtitles(
         AddonSubtitleStartupMode.FAST_STARTUP -> emptyList()
     }
 
+    val visibleSubtitles = if (showOnlyPreferredLanguages) attachedSubtitles else fetchedSubtitles
+
     return StartupSubtitlePreparation(
-        fetchedSubtitles = fetchedSubtitles,
+        fetchedSubtitles = visibleSubtitles,
         attachedSubtitles = attachedSubtitles,
         fetchCompleted = true
     )
@@ -745,6 +828,7 @@ internal suspend fun PlayerRuntimeController.prepareStreamStartSubtitles(
         mode = playerSettings.addonSubtitleStartupMode,
         preferredLanguage = playerSettings.subtitleStyle.preferredLanguage,
         secondaryLanguage = playerSettings.subtitleStyle.secondaryPreferredLanguage,
+        showOnlyPreferredLanguages = playerSettings.subtitleStyle.showOnlyPreferredLanguages,
         showLoadingStatus = showLoadingStatus
     )
 }
@@ -809,7 +893,10 @@ private class SubtitleOffsetRenderersFactory(
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf(gainAudioProcessor))
             .build()
-        val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(baseAudioSink)
+        val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
+            sink = baseAudioSink,
+            forceAudioProcessingPcmProvider = gainAudioProcessor::isGainEnabled
+        )
         playbackSpeedAwareAudioSink.setInitialPlaybackSpeed(playbackSpeedProvider())
         onPlaybackSpeedAwareAudioSinkCreated(playbackSpeedAwareAudioSink)
         return playbackSpeedAwareAudioSink
