@@ -7,6 +7,7 @@ import com.nuvio.tv.data.repository.SkipInterval
 import com.nuvio.tv.domain.model.ContentType
 import com.nuvio.tv.domain.model.Meta
 import com.nuvio.tv.domain.model.Stream
+import com.nuvio.tv.domain.model.resolveContentLanguage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -39,6 +40,10 @@ internal fun PlayerRuntimeController.applyMetaDetails(meta: Meta) {
     metaVideos = meta.videos
     metaGenres = meta.genres
     metaCountry = meta.country
+    // Fill in content language from meta if not provided via navigation args.
+    if (contentLanguage == null) {
+        contentLanguage = meta.resolveContentLanguage()
+    }
     val description = resolveDescription(meta)
 
     _uiState.update { state ->
@@ -276,7 +281,8 @@ private fun PlayerRuntimeController.applyRecomputedNextEpisode(
             nextEpisode = nextInfo,
             postPlayMode = updatedMode,
             postPlayDismissedForCurrentEpisode =
-                if (shouldResetVisibility) false else state.postPlayDismissedForCurrentEpisode,
+                if (shouldResetVisibility && !state.postPlayDismissedForCurrentEpisode) false
+                else state.postPlayDismissedForCurrentEpisode,
         )
     }
 }
@@ -321,6 +327,8 @@ internal fun PlayerRuntimeController.evaluatePostPlayOverlayVisibility(positionM
     )
 
     if (!shouldShow) return
+
+    if (_uiState.value.postPlayDismissedForCurrentEpisode) return
 
     val shouldEnterStillWatching = shouldEnterStillWatchingPrompt(
         stillWatchingEnabled = stillWatchingEnabledSetting,
@@ -414,63 +422,56 @@ internal fun PlayerRuntimeController.tryShowParentalGuide() {
 }
 
 internal fun PlayerRuntimeController.fetchParentalGuide(id: String?, type: String?, season: Int?, episode: Int?) {
+    if (!parentalGuideEnabled) return
     if (id.isNullOrBlank()) return
 
     val imdbId = id.split(":").firstOrNull()?.takeIf { it.startsWith("tt") } ?: return
 
     scope.launch {
-        val response = if (type in listOf("series", "tv") && season != null && episode != null) {
-            parentalGuideRepository.getTVGuide(imdbId, season, episode)
-        } else {
-            parentalGuideRepository.getMovieGuide(imdbId)
+        val guide = parentalGuideRepository.getParentalGuide(imdbId) ?: return@launch
+
+        val labels = mapOf(
+            "nudity" to context.getString(R.string.parental_nudity),
+            "violence" to context.getString(R.string.parental_violence),
+            "profanity" to context.getString(R.string.parental_profanity),
+            "alcohol" to context.getString(R.string.parental_alcohol),
+            "frightening" to context.getString(R.string.parental_frightening)
+        )
+        val severityOrder = mapOf(
+            "severe" to 0, "moderate" to 1, "mild" to 2
+        )
+
+        val entries = listOfNotNull(
+            guide.nudity?.let { "nudity" to it },
+            guide.violence?.let { "violence" to it },
+            guide.profanity?.let { "profanity" to it },
+            guide.alcohol?.let { "alcohol" to it },
+            guide.frightening?.let { "frightening" to it }
+        )
+
+        val warnings = entries
+            .sortedBy { severityOrder[it.second.lowercase()] ?: 3 }
+            .map {
+                val localizedSeverity = when (it.second.lowercase()) {
+                    "severe" -> context.getString(R.string.parental_severity_severe)
+                    "moderate" -> context.getString(R.string.parental_severity_moderate)
+                    "mild" -> context.getString(R.string.parental_severity_mild)
+                    else -> it.second
+                }
+                ParentalWarning(label = labels[it.first] ?: it.first, severity = localizedSeverity)
+            }
+            .take(5)
+
+        _uiState.update {
+            it.copy(
+                parentalWarnings = warnings,
+                showParentalGuide = false,
+                parentalGuideHasShown = false
+            )
         }
 
-        if (response?.parentalGuide != null) {
-            val guide = response.parentalGuide
-            val labels = mapOf(
-                "nudity" to context.getString(R.string.parental_nudity),
-                "violence" to context.getString(R.string.parental_violence),
-                "profanity" to context.getString(R.string.parental_profanity),
-                "alcohol" to context.getString(R.string.parental_alcohol),
-                "frightening" to context.getString(R.string.parental_frightening)
-            )
-            val severityOrder = mapOf(
-                "severe" to 0, "moderate" to 1, "mild" to 2
-            )
-
-            val entries = listOfNotNull(
-                guide.nudity?.let { "nudity" to it },
-                guide.violence?.let { "violence" to it },
-                guide.profanity?.let { "profanity" to it },
-                guide.alcohol?.let { "alcohol" to it },
-                guide.frightening?.let { "frightening" to it }
-            )
-
-            val warnings = entries
-                .filter { it.second.lowercase() != "none" }
-                .sortedBy { severityOrder[it.second.lowercase()] ?: 3 }
-                .map {
-                    val localizedSeverity = when (it.second.lowercase()) {
-                        "severe" -> context.getString(R.string.parental_severity_severe)
-                        "moderate" -> context.getString(R.string.parental_severity_moderate)
-                        "mild" -> context.getString(R.string.parental_severity_mild)
-                        else -> it.second
-                    }
-                    ParentalWarning(label = labels[it.first] ?: it.first, severity = localizedSeverity)
-                }
-                .take(5)
-
-            _uiState.update {
-                it.copy(
-                    parentalWarnings = warnings,
-                    showParentalGuide = false,
-                    parentalGuideHasShown = false
-                )
-            }
-
-            if (_uiState.value.isPlaying) {
-                tryShowParentalGuide()
-            }
+        if (_uiState.value.isPlaying) {
+            tryShowParentalGuide()
         }
     }
 }

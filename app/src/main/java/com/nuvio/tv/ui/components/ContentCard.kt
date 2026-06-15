@@ -64,7 +64,6 @@ import androidx.tv.material3.Text
 import com.nuvio.tv.domain.model.ContentType
 import com.nuvio.tv.domain.model.MetaPreview
 import com.nuvio.tv.domain.model.PosterShape
-import com.nuvio.tv.ui.theme.NuvioColors
 import com.nuvio.tv.ui.theme.NuvioTheme
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -73,14 +72,8 @@ import coil3.request.crossfade
 import com.nuvio.tv.ui.util.recompositionHighlighter
 import com.nuvio.tv.ui.screens.home.LocalFastScrollActive
 import com.nuvio.tv.ui.theme.ThemeColors
+import com.nuvio.tv.ui.util.rememberLongPressKeyTracker
 import kotlinx.coroutines.delay
-
-/**
- * When true, vertical scrolling is in progress and image loading should be
- * restricted to memory cache only (no disk / network) to keep the scroll smooth.
- */
-val LocalVerticalScrollSuppressImages = androidx.compose.runtime.compositionLocalOf { false }
-
 
 private const val BACKDROP_ASPECT_RATIO = 16f / 9f
 private const val TRAILER_PREVIEW_REQUEST_FOCUS_DEBOUNCE_MS = 140L
@@ -126,6 +119,7 @@ fun ContentCard(
 
     var isFocused by remember { mutableStateOf(false) }
     var longPressTriggered by remember { mutableStateOf(false) }
+    val longPressKeyTracker = rememberLongPressKeyTracker()
     var interactionNonce by remember { mutableIntStateOf(0) }
     var isBackdropExpanded by remember { mutableStateOf(false) }
     var trailerFirstFrameRendered by remember(trailerPreviewUrl) { mutableStateOf(false) }
@@ -173,7 +167,7 @@ fun ContentCard(
 
     // Only pay the animation cost on the card that is actually focused/expanding.
     // Unfocused cards snap directly to baseCardWidth — no animation state overhead.
-    val isFastScrollActive = LocalFastScrollActive.current
+    val isFastScrollActive = LocalFastScrollActive.current.value
     val animatedCardWidth = when {
         !focusedPosterBackdropExpandEnabled -> baseCardWidth
         !isFocused && !isBackdropExpanded -> baseCardWidth
@@ -230,10 +224,10 @@ fun ContentCard(
             baseCardWidth
         }
         val requestWidthPx = remember(maxRequestCardWidth, density) {
-            with(density) { maxRequestCardWidth.roundToPx() }
+            with(density) { maxRequestCardWidth.roundToPx() }.coerceAtLeast(1)
         }
         val requestHeightPx = remember(baseCardHeight, density) {
-            with(density) { baseCardHeight.roundToPx() }
+            with(density) { baseCardHeight.roundToPx() }.coerceAtLeast(1)
         }
 
         val imageUrl = if (focusedPosterBackdropExpandEnabled && isBackdropExpanded) {
@@ -249,23 +243,8 @@ fun ContentCard(
                 .size(width = requestWidthPx, height = requestHeightPx)
                 .build()
         }
-        // Coil 3's skippable AsyncImage makes the memory-only-during-scroll hack incompatible.
-        val isSuppressingImages = LocalVerticalScrollSuppressImages.current
-        val scrollAwareImageModel = if (!isSuppressingImages || imageModel == null) {
-            imageModel
-        } else {
-            remember(imageModel) {
-                (imageModel as? ImageRequest)?.newBuilder()
-                    ?.memoryCachePolicy(CachePolicy.ENABLED)
-                    ?.diskCachePolicy(CachePolicy.DISABLED)
-                    ?.networkCachePolicy(CachePolicy.DISABLED)
-                    ?.build()
-                    ?: imageModel
-            }
-        }
-        val scrollPhaseKey = isSuppressingImages
         val logoRequestHeightPx = remember(density) {
-            with(density) { 48.dp.roundToPx() }
+            with(density) { NuvioTheme.spacing.xxxl.roundToPx() }
         }
         val logoModel = remember(item.logo, requestWidthPx, logoRequestHeightPx) {
             item.logo?.let { logoUrl ->
@@ -280,7 +259,7 @@ fun ContentCard(
         var logoLoadFailed by remember(item.logo) { mutableStateOf(false) }
         val showExpandedLogo = !item.logo.isNullOrBlank() && !logoLoadFailed
 
-        val bgCardColor = NuvioColors.BackgroundCard
+        val bgCardColor = NuvioTheme.colors.BackgroundCard
         val backgroundPainter = remember(bgCardColor) { androidx.compose.ui.graphics.painter.ColorPainter(bgCardColor) }
 
         Card(
@@ -324,17 +303,22 @@ fun ContentCard(
                                 onLongPress()
                                 return@onPreviewKeyEvent true
                             }
-                            val isLongPress = native.isLongPress || native.repeatCount > 0
-                            if (isLongPress && isSelectKey(native.keyCode)) {
-                                longPressTriggered = true
-                                onLongPress()
-                                return@onPreviewKeyEvent true
-                            }
                         }
+                    }
+                    if (onLongPress != null &&
+                        longPressKeyTracker.handle(native, ::isSelectKey) {
+                            longPressTriggered = true
+                            onLongPress()
+                        }
+                    ) {
+                        if (native.action == AndroidKeyEvent.ACTION_UP) {
+                            longPressTriggered = false
+                        }
+                        return@onPreviewKeyEvent true
                     }
                     if (native.action == AndroidKeyEvent.ACTION_UP &&
                         longPressTriggered &&
-                        isSelectKey(native.keyCode)
+                        (isSelectKey(native.keyCode) || native.keyCode == AndroidKeyEvent.KEYCODE_MENU)
                     ) {
                         longPressTriggered = false
                         return@onPreviewKeyEvent true
@@ -359,7 +343,7 @@ fun ContentCard(
             ),
             border = CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(posterCardStyle.focusedBorderWidth, NuvioColors.FocusRing),
+                    border = BorderStroke(posterCardStyle.focusedBorderWidth, NuvioTheme.colors.FocusRing),
                     shape = cardShape
                 )
             ),
@@ -382,21 +366,19 @@ fun ContentCard(
                             .fillMaxSize()
                             .placeholderCardShimmer(
                                 shimmerOffsetState = effectivePlaceholderShimmerOffsetState,
-                                backgroundColor = NuvioColors.BackgroundCard
+                                backgroundColor = NuvioTheme.colors.BackgroundCard
                             )
                     )
                 } else if (!imageUrl.isNullOrBlank()) {
-                    key(scrollPhaseKey) {
-                        AsyncImage(
-                            model = scrollAwareImageModel,
-                            contentDescription = item.name,
-                            modifier = Modifier.fillMaxSize(),
-                            placeholder = backgroundPainter,
-                            error = backgroundPainter,
-                            fallback = backgroundPainter,
-                            contentScale = ContentScale.Crop
-                        )
-                    }
+                    AsyncImage(
+                        model = imageModel,
+                        contentDescription = item.name,
+                        modifier = Modifier.fillMaxSize(),
+                        placeholder = backgroundPainter,
+                        error = backgroundPainter,
+                        fallback = backgroundPainter,
+                        contentScale = ContentScale.Crop
+                    )
                 } else {
                     MonochromePosterPlaceholder()
                 }
@@ -476,7 +458,7 @@ fun ContentCard(
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+                            .padding(start = NuvioTheme.spacing.md, end = NuvioTheme.spacing.md, bottom = NuvioTheme.spacing.md)
                             .fillMaxWidth(0.75f)
                     ) {
                         if (showExpandedLogo) {
@@ -485,7 +467,7 @@ fun ContentCard(
                                 contentDescription = item.name,
                                 onError = { logoLoadFailed = true },
                                 modifier = Modifier
-                                    .height(48.dp)
+                                    .height(NuvioTheme.spacing.xxxl)
                                     .fillMaxWidth(),
                                 contentScale = ContentScale.Fit,
                                 alignment = Alignment.CenterStart
@@ -506,15 +488,15 @@ fun ContentCard(
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(end = 8.dp, top = 8.dp)
+                            .padding(end = NuvioTheme.spacing.sm, top = NuvioTheme.spacing.sm)
                             .zIndex(2f)
                             .size(21.dp)
                             .shadow(10.dp, shape = CircleShape, spotColor = Color.Transparent)
-                            .background(NuvioColors.Secondary, CircleShape)
+                            .background(NuvioTheme.colors.Secondary, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            tint = if (NuvioColors.Secondary == ThemeColors.White.secondary) Color.Black else Color.White,
+                            tint = if (NuvioTheme.colors.Secondary == ThemeColors.White.secondary) Color.Black else Color.White,
                             contentDescription = stringResource(R.string.episodes_cd_watched),
                             modifier = Modifier.size(20.dp)
                         )
@@ -530,7 +512,7 @@ fun ContentCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp)
+                    .padding(top = NuvioTheme.spacing.sm)
             ) {
                 if (isBackdropExpanded) {
                     if (metaTokens.isNotEmpty()) {
@@ -543,11 +525,11 @@ fun ContentCard(
                         )
                     }
                     item.description?.takeIf { it.isNotBlank() }?.let { description ->
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
                         Text(
                             text = description,
                             style = MaterialTheme.typography.bodySmall,
-                            color = NuvioColors.TextPrimary,
+                            color = NuvioTheme.colors.TextPrimary,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -556,7 +538,7 @@ fun ContentCard(
                     Text(
                         text = item.name,
                         style = MaterialTheme.typography.titleMedium,
-                        color = NuvioColors.TextPrimary,
+                        color = NuvioTheme.colors.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

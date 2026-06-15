@@ -2,6 +2,8 @@
 
 package com.nuvio.tv.ui.screens.settings
 
+import com.nuvio.tv.ui.theme.NuvioTheme
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.nuvio.tv.R
 import com.nuvio.tv.core.build.AppFeaturePolicy
-import com.nuvio.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
+import com.nuvio.tv.data.local.AVAILABLE_TMDB_LANGUAGES
 import com.nuvio.tv.data.local.displayName
 
 @Composable
@@ -72,7 +74,7 @@ fun TmdbSettingsContent(
             LazyColumn(
                 state = tmdbListState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 8.dp),
+                contentPadding = PaddingValues(bottom = NuvioTheme.spacing.sm),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item(key = "tmdb_enabled") {
@@ -82,7 +84,7 @@ fun TmdbSettingsContent(
                         checked = uiState.enabled,
                         onToggle = { viewModel.onEvent(TmdbSettingsEvent.ToggleEnabled(!uiState.enabled)) },
                         modifier = Modifier
-                            .padding(top = 2.dp)
+                            .padding(top = NuvioTheme.spacing.xxs)
                             .then(
                                 if (initialFocusRequester != null) {
                                     Modifier.focusRequester(initialFocusRequester)
@@ -121,7 +123,7 @@ fun TmdbSettingsContent(
                 }
 
                 item(key = "tmdb_language") {
-                    val languageName = AVAILABLE_SUBTITLE_LANGUAGES
+                    val languageName = AVAILABLE_TMDB_LANGUAGES
                         .find { it.code == uiState.language }
                         ?.displayName
                         ?: uiState.language.uppercase()

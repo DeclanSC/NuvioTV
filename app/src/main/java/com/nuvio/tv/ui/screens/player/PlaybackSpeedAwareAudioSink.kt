@@ -9,14 +9,14 @@ import androidx.media3.exoplayer.audio.ForwardingAudioSink
 
 internal class PlaybackSpeedAwareAudioSink(
     sink: AudioSink,
-    private val forceAudioProcessingPcmProvider: () -> Boolean = { false }
+    initialForcePcm: Boolean = false
 ) : ForwardingAudioSink(sink) {
 
     @Volatile
     private var playbackSpeed: Float = 1f
 
     @Volatile
-    private var forcePcmForCurrentSession: Boolean = false
+    private var forcePcmForCurrentSession: Boolean = initialForcePcm
 
     @Volatile
     private var currentInputFormat: Format? = null
@@ -49,6 +49,10 @@ internal class PlaybackSpeedAwareAudioSink(
         }
     }
 
+    fun notifyAudioProcessingRequirementChanged() {
+        listener?.onAudioCapabilitiesChanged()
+    }
+
     override fun getFormatSupport(format: Format): Int {
         if (shouldRejectDirectPlayback(format)) {
             return AudioSink.SINK_FORMAT_UNSUPPORTED
@@ -67,14 +71,7 @@ internal class PlaybackSpeedAwareAudioSink(
         return shouldRejectDirectPlayback(format)
     }
 
-    fun notifyAudioProcessingRequirementChanged() {
-        listener?.onAudioCapabilitiesChanged()
-    }
-
     private fun shouldRejectDirectPlayback(format: Format): Boolean {
-        if (forceAudioProcessingPcmProvider() && requiresPcmForAudioProcessing(format)) {
-            return true
-        }
         return requiresPcmForSpeed(format) && (forcePcmForCurrentSession || playbackSpeed != 1f)
     }
 
@@ -89,11 +86,6 @@ internal class PlaybackSpeedAwareAudioSink(
 
     private fun normalizeSpeed(speed: Float): Float {
         return speed.takeIf { it > 0f } ?: 1f
-    }
-
-    private fun requiresPcmForAudioProcessing(format: Format): Boolean {
-        val mimeType = format.sampleMimeType ?: return false
-        return MimeTypes.isAudio(mimeType) && mimeType != MimeTypes.AUDIO_RAW
     }
 
     private fun requiresPcmForSpeed(format: Format): Boolean {

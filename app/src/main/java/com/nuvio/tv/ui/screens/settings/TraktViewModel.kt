@@ -9,6 +9,7 @@ import com.nuvio.tv.core.sync.WatchedItemsSyncService
 import com.nuvio.tv.data.local.TraktAuthDataStore
 import com.nuvio.tv.data.local.TraktAuthState
 import com.nuvio.tv.data.local.TraktSettingsDataStore
+import com.nuvio.tv.data.local.MoreLikeThisSourcePreference
 import com.nuvio.tv.data.local.WatchProgressSource
 import com.nuvio.tv.data.local.WatchedItemsPreferences
 import com.nuvio.tv.data.local.WatchedSeriesStateHolder
@@ -52,7 +53,8 @@ data class TraktUiState(
     val librarySourceMode: LibrarySourceMode = TraktSettingsDataStore.DEFAULT_LIBRARY_SOURCE_MODE,
     val connectedStats: TraktProgressService.TraktCachedStats? = null,
     val statusMessage: String? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val moreLikeThisSource: MoreLikeThisSourcePreference = TraktSettingsDataStore.DEFAULT_MORE_LIKE_THIS_SOURCE
 )
 
 @HiltViewModel
@@ -63,6 +65,7 @@ class TraktViewModel @Inject constructor(
     private val traktSettingsDataStore: TraktSettingsDataStore,
     private val startupSyncService: StartupSyncService,
     private val watchedItemsPreferences: WatchedItemsPreferences,
+    private val watchProgressPreferences: com.nuvio.tv.data.local.WatchProgressPreferences,
     private val watchedItemsSyncService: WatchedItemsSyncService,
     private val watchedSeriesStateHolder: WatchedSeriesStateHolder,
     private val cwEnrichmentCache: com.nuvio.tv.data.local.ContinueWatchingEnrichmentCache,
@@ -112,12 +115,22 @@ class TraktViewModel @Inject constructor(
         }
     }
 
+    fun onMoreLikeThisSourceSelected(source: MoreLikeThisSourcePreference) {
+        viewModelScope.launch {
+            traktSettingsDataStore.setMoreLikeThisSource(source)
+            _uiState.update { it.copy(moreLikeThisSource = source) }
+        }
+    }
+
     fun onWatchProgressSourceSelected(source: WatchProgressSource) {
         viewModelScope.launch {
             traktSettingsDataStore.setWatchProgressSource(source)
             // Clear CW cache so stale items from the previous source don't flash on screen.
             cwEnrichmentCache.saveInProgressSnapshot(emptyList(), force = true)
             cwEnrichmentCache.saveNextUpSnapshot(emptyList(), force = true)
+            watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
+                !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
+            }
             if (source == WatchProgressSource.TRAKT) {
                 watchedItemsPreferences.clearAll()
                 watchedSeriesStateHolder.update(emptySet())
@@ -220,10 +233,13 @@ class TraktViewModel @Inject constructor(
             // Clear CW cache so stale Trakt items don't flash on next launch.
             cwEnrichmentCache.saveInProgressSnapshot(emptyList(), force = true)
             cwEnrichmentCache.saveNextUpSnapshot(emptyList(), force = true)
-            // Repopulate watched items from Nuvio sync now that Trakt is no
-            // longer the source of truth.
+            watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
+                !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
+            }
             watchedSeriesStateHolder.update(emptySet())
+            // Repopulate from Nuvio sync.
             repopulateWatchedItemsFromNuvioSync()
+            startupSyncService.requestSyncNow()
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -274,13 +290,15 @@ class TraktViewModel @Inject constructor(
                 traktSettingsDataStore.continueWatchingDaysCap,
                 traktSettingsDataStore.showMetaComments,
                 traktSettingsDataStore.watchProgressSource,
-                traktSettingsDataStore.librarySourceMode
-            ) { daysCap, showMetaComments, watchProgressSource, librarySourceMode ->
+                traktSettingsDataStore.librarySourceMode,
+                traktSettingsDataStore.moreLikeThisSource
+            ) { daysCap, showMetaComments, watchProgressSource, librarySourceMode, moreLikeThisSource ->
                 SettingsSnapshot(
                     continueWatchingDaysCap = daysCap,
                     showMetaComments = showMetaComments,
                     watchProgressSource = watchProgressSource,
-                    librarySourceMode = librarySourceMode
+                    librarySourceMode = librarySourceMode,
+                    moreLikeThisSource = moreLikeThisSource
                 )
             }.collectLatest { snapshot ->
                 _uiState.update {
@@ -288,7 +306,8 @@ class TraktViewModel @Inject constructor(
                         continueWatchingDaysCap = snapshot.continueWatchingDaysCap,
                         showMetaComments = snapshot.showMetaComments,
                         watchProgressSource = snapshot.watchProgressSource,
-                        librarySourceMode = snapshot.librarySourceMode
+                        librarySourceMode = snapshot.librarySourceMode,
+                        moreLikeThisSource = snapshot.moreLikeThisSource
                     )
                 }
             }
@@ -299,7 +318,8 @@ class TraktViewModel @Inject constructor(
         val continueWatchingDaysCap: Int,
         val showMetaComments: Boolean,
         val watchProgressSource: WatchProgressSource,
-        val librarySourceMode: LibrarySourceMode
+        val librarySourceMode: LibrarySourceMode,
+        val moreLikeThisSource: MoreLikeThisSourcePreference
     )
 
     private fun applyAuthState(authState: TraktAuthState) {

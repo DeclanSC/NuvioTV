@@ -1,5 +1,8 @@
 package com.nuvio.tv.ui.screens.search
 
+import com.nuvio.tv.ui.theme.NuvioTheme
+import com.nuvio.tv.ui.screens.home.HeroBackdropState
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,6 +38,7 @@ import kotlin.math.roundToInt
 @Composable
 fun DiscoverScreen(
     viewModel: SearchViewModel = hiltViewModel(),
+    showBuiltInHeader: Boolean = true,
     onNavigateToDetail: (String, String, String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -92,6 +96,7 @@ fun DiscoverScreen(
                 watchedMovieIds = watchedMovieIds,
                 watchedSeriesIds = watchedSeriesIds,
                 focusResults = false,
+                showBuiltInHeader = showBuiltInHeader,
                 firstItemFocusRequester = discoverFirstItemFocusRequester,
                 focusedItemIndex = discoverFocusedItemIndex,
                 shouldRestoreFocusedItem = restoreDiscoverFocus,
@@ -118,7 +123,7 @@ fun DiscoverScreen(
                 onItemLongPress = { item, addonBaseUrl ->
                     viewModel.posterOptions.show(item, addonBaseUrl)
                 },
-                modifier = Modifier.padding(top = 16.dp)
+                modifier = Modifier.padding(top = NuvioTheme.spacing.lg)
             )
         }
 
@@ -128,6 +133,8 @@ fun DiscoverScreen(
             controller = viewModel.posterOptions,
             onNavigateToDetail = { id, type, addonBaseUrl ->
                 pendingDiscoverRestoreOnResume = true
+                val clickedItem = uiState.discoverResults.firstOrNull { it.id == id }
+                HeroBackdropState.update(clickedItem?.backdropUrl)
                 onNavigateToDetail(id, type, addonBaseUrl)
             }
         )

@@ -1,20 +1,25 @@
 package com.nuvio.tv.ui.components.posteroptions
 
 import android.util.Log
+import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.tmdb.TmdbService
+import com.nuvio.tv.data.local.WatchedSeriesStateHolder
 import com.nuvio.tv.data.repository.parseContentIds
 import com.nuvio.tv.domain.model.LibraryEntryInput
 import com.nuvio.tv.domain.model.LibraryListTab
 import com.nuvio.tv.domain.model.LibrarySourceMode
 import com.nuvio.tv.domain.model.ListMembershipChanges
 import com.nuvio.tv.domain.model.MetaPreview
+import com.nuvio.tv.domain.model.Video
 import com.nuvio.tv.domain.model.WatchProgress
 import com.nuvio.tv.domain.repository.LibraryRepository
+import com.nuvio.tv.domain.repository.MetaRepository
 import com.nuvio.tv.domain.repository.WatchProgressRepository
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -37,6 +42,8 @@ class PosterOptionsController @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val libraryRepository: LibraryRepository,
     private val watchProgressRepository: WatchProgressRepository,
+    private val metaRepository: MetaRepository,
+    private val watchedSeriesStateHolder: WatchedSeriesStateHolder,
     private val tmdbService: TmdbService
 ) {
     private val _state = MutableStateFlow(PosterOptionsState())
@@ -46,6 +53,7 @@ class PosterOptionsController @Inject constructor(
 
     private var scope: CoroutineScope? = null
     private var bound = false
+    private var showJob: kotlinx.coroutines.Job? = null
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun bind(scope: CoroutineScope) {
@@ -94,10 +102,20 @@ class PosterOptionsController @Inject constructor(
                 if (item == null) {
                     flowOf(false to false)
                 } else {
-                    combine(
-                        libraryRepository.isInLibrary(item.id, item.apiType),
-                        watchProgressRepository.isWatched(item.id, videoId = item.imdbId)
-                    ) { lib, watched -> lib to watched }
+                    val isSeries = item.apiType.equals("series", ignoreCase = true) ||
+                        item.apiType.equals("tv", ignoreCase = true) ||
+                        item.apiType.equals("anime", ignoreCase = true)
+                    if (isSeries) {
+                        combine(
+                            libraryRepository.isInLibrary(item.id, item.apiType),
+                            watchedSeriesStateHolder.fullyWatchedSeriesIds
+                        ) { lib, watchedIds -> lib to (item.id in watchedIds) }
+                    } else {
+                        combine(
+                            libraryRepository.isInLibrary(item.id, item.apiType),
+                            watchProgressRepository.isWatched(item.id, videoId = item.imdbId)
+                        ) { lib, watched -> lib to watched }
+                    }
                 }
             }
             .onEach { (isInLibrary, isWatched) ->
@@ -112,28 +130,35 @@ class PosterOptionsController @Inject constructor(
     }
 
     fun show(item: MetaPreview, addonBaseUrl: String?) {
-        _state.update { current ->
-            current.copy(
-                target = item,
-                addonBaseUrl = addonBaseUrl.orEmpty(),
-                isInLibrary = false,
-                isWatched = false,
-                isLibraryPending = false,
-                isWatchedPending = false
-            )
-        }
-        targetFlow.value = item
-
-        // Resolve TMDB→IMDB in the background so the dialog observes — and writes — under
-        // the same canonical id the details screen uses. Without this, adding from a
-        // TMDB-rooted screen (cast filmography, TMDB lists) and then again from details
-        // creates duplicate library/watched entries (the storage key-matches exactly).
-        scope?.launch {
+        val launchScope = this.scope ?: return
+        showJob?.cancel()
+        showJob = launchScope.launch {
             val canonical = canonicalize(item)
-            if (canonical.id != item.id && _state.value.target?.id == item.id) {
-                _state.update { it.copy(target = canonical) }
-                targetFlow.value = canonical
+            val isSeries = canonical.apiType.equals("series", ignoreCase = true) ||
+                canonical.apiType.equals("tv", ignoreCase = true) ||
+                canonical.apiType.equals("anime", ignoreCase = true)
+            val initialIsInLibrary = runCatching {
+                libraryRepository.isInLibrary(canonical.id, canonical.apiType).first()
+            }.getOrDefault(false)
+            val initialIsWatched = if (isSeries) {
+                canonical.id in watchedSeriesStateHolder.fullyWatchedSeriesIds.value
+            } else {
+                runCatching {
+                    watchProgressRepository.isWatched(canonical.id, videoId = canonical.imdbId).first()
+                }.getOrDefault(false)
             }
+
+            _state.update { current ->
+                current.copy(
+                    target = canonical,
+                    addonBaseUrl = addonBaseUrl.orEmpty(),
+                    isInLibrary = initialIsInLibrary,
+                    isWatched = initialIsWatched,
+                    isLibraryPending = false,
+                    isWatchedPending = false
+                )
+            }
+            targetFlow.value = canonical
         }
     }
 
@@ -141,7 +166,8 @@ class PosterOptionsController @Inject constructor(
         if (item.id.startsWith("tt", ignoreCase = false)) return item
         val tmdbNumber = parseContentIds(item.id).tmdb ?: item.id.toIntOrNull() ?: return item
         val mediaType = if (item.apiType.equals("series", ignoreCase = true) ||
-            item.apiType.equals("tv", ignoreCase = true)
+            item.apiType.equals("tv", ignoreCase = true) ||
+            item.apiType.equals("anime", ignoreCase = true)
         ) "tv" else "movie"
         val imdb = runCatching { tmdbService.tmdbToImdb(tmdbNumber, mediaType) }.getOrNull()
         return if (!imdb.isNullOrBlank()) item.copy(id = imdb) else item
@@ -158,6 +184,8 @@ class PosterOptionsController @Inject constructor(
     }
 
     fun dismiss() {
+        showJob?.cancel()
+        showJob = null
         targetFlow.value = null
         _state.update { it.copy(target = null) }
     }
@@ -320,6 +348,98 @@ class PosterOptionsController @Inject constructor(
             }
             _state.update { it.copy(isWatchedPending = false) }
         }
+    }
+
+    fun toggleSeriesWatched() {
+        val state = _state.value
+        val item = state.target ?: return
+        val isSeries = item.apiType.equals("series", ignoreCase = true) ||
+            item.apiType.equals("tv", ignoreCase = true) ||
+            item.apiType.equals("anime", ignoreCase = true)
+        if (!isSeries) return
+        if (state.isWatchedPending) return
+        val scope = this.scope ?: return
+
+        val currentlyWatched = state.isWatched
+
+        // Optimistic UI update — badge changes immediately
+        val currentIds = watchedSeriesStateHolder.fullyWatchedSeriesIds.value
+        val optimisticIds = if (currentlyWatched) currentIds - item.id else currentIds + item.id
+        watchedSeriesStateHolder.update(optimisticIds)
+
+        _state.update { it.copy(isWatchedPending = true) }
+        scope.launch {
+            val canonical = ensureCanonical() ?: return@launch
+            runCatching {
+                if (currentlyWatched) {
+                    unmarkSeriesWatched(canonical)
+                } else {
+                    markSeriesWatched(canonical)
+                }
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to toggle series watched for ${canonical.id}: ${error.message}")
+                // Revert optimistic update on failure
+                watchedSeriesStateHolder.update(currentIds)
+            }
+            _state.update { it.copy(isWatchedPending = false) }
+        }
+    }
+
+    private suspend fun markSeriesWatched(item: MetaPreview) {
+        val episodes = fetchSeriesEpisodes(item).filter { it.season != null && it.episode != null && it.season != 0 }
+        if (episodes.isEmpty()) {
+            watchProgressRepository.markAsCompleted(buildCompletedMovieProgress(item))
+            return
+        }
+
+        val progressList = episodes.map { video ->
+            WatchProgress(
+                contentId = item.id,
+                contentType = item.apiType,
+                name = item.name,
+                poster = item.poster,
+                backdrop = item.backdropUrl,
+                logo = item.logo,
+                videoId = video.id,
+                season = video.season,
+                episode = video.episode,
+                episodeTitle = video.title,
+                position = 1L,
+                duration = 1L,
+                lastWatched = System.currentTimeMillis(),
+                progressPercent = 100f
+            )
+        }
+        watchProgressRepository.markAsCompletedBatch(progressList)
+    }
+
+    private suspend fun unmarkSeriesWatched(item: MetaPreview) {
+        val episodes = fetchSeriesEpisodes(item).filter { it.season != null && it.episode != null && it.season != 0 }
+        if (episodes.isEmpty()) {
+            watchProgressRepository.removeFromHistory(item.id, videoId = item.imdbId)
+            return
+        }
+
+        val episodePairs = episodes.map { it.season!! to it.episode!! }
+        watchProgressRepository.removeFromHistoryBatch(
+            contentId = item.id,
+            videoId = item.imdbId,
+            episodes = episodePairs
+        )
+    }
+
+    private suspend fun fetchSeriesEpisodes(item: MetaPreview): List<Video> {
+        val type = if (item.apiType.equals("tv", ignoreCase = true) ||
+            item.apiType.equals("anime", ignoreCase = true)
+        ) "series" else item.apiType
+        var episodes: List<Video> = emptyList()
+        metaRepository.getMetaFromPrimaryAddon(type, item.id)
+            .collect { networkResult ->
+                if (networkResult is NetworkResult.Success) {
+                    episodes = networkResult.data.videos
+                }
+            }
+        return episodes
     }
 
     private var activeListPickerInput: LibraryEntryInput? = null

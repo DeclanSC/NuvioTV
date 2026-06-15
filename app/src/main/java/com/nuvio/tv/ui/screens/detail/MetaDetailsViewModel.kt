@@ -132,6 +132,7 @@ class MetaDetailsViewModel @Inject constructor(
     private var hideUnreleasedContent = false
     private var traktCommentsEnabled = false
     private var traktAuthenticated = false
+    private var moreLikeThisSourcePreference = com.nuvio.tv.data.local.MoreLikeThisSourcePreference.TRAKT
 
     /** Content ID used for watch-progress and watched-items lookups.
      *  Starts as the navigation [itemId] (which may be "tmdb:123") and is
@@ -194,6 +195,11 @@ class MetaDetailsViewModel @Inject constructor(
     }
 
     private fun observeTraktCommentsAvailability() {
+        viewModelScope.launch {
+            traktSettingsDataStore.moreLikeThisSource.collectLatest { source ->
+                moreLikeThisSourcePreference = source
+            }
+        }
         viewModelScope.launch {
             combine(
                 traktSettingsDataStore.showMetaComments,
@@ -275,7 +281,7 @@ class MetaDetailsViewModel @Inject constructor(
                 nextSeason != state.selectedSeason &&
                 meta != null &&
                 state.seasons.contains(nextSeason)
-            if (shouldSwitchSeason && meta != null && nextSeason != null) {
+            if (shouldSwitchSeason) {
                 state.copy(
                     nextToWatch = nextToWatch,
                     selectedSeason = nextSeason,
@@ -695,7 +701,8 @@ class MetaDetailsViewModel @Inject constructor(
             id = itemId,
             type = type,
             rawType = itemType,
-            name = enrichment.localizedTitle ?: enrichment.originalTitle ?: "TMDB $tmdbId",
+            name = enrichment.localizedTitle ?: enrichment.originalTitle
+                ?: context.getString(R.string.detail_tmdb_fallback_title, tmdbId),
             poster = enrichment.poster,
             posterShape = com.nuvio.tv.domain.model.PosterShape.POSTER,
             background = enrichment.backdrop,
@@ -1116,6 +1123,7 @@ class MetaDetailsViewModel @Inject constructor(
 
     private fun shouldLoadTraktMoreLikeThis(meta: Meta): Boolean {
         if (!traktAuthenticated) return false
+        if (moreLikeThisSourcePreference == com.nuvio.tv.data.local.MoreLikeThisSourcePreference.TMDB) return false
         return when (meta.type) {
             ContentType.MOVIE -> true
             ContentType.SERIES, ContentType.TV -> true
@@ -2206,9 +2214,9 @@ class MetaDetailsViewModel @Inject constructor(
         suppressSeasonAutoSwitch = true
         viewModelScope.launch {
             val episodes = if (meta.apiType.equals("other", ignoreCase = true)) {
-                _uiState.value.episodesForSeason.filter { it.season != null && it.season < targetSeason && it.episode != null }
+                _uiState.value.episodesForSeason.filter { it.season != null && it.season < targetSeason && it.season > 0 && it.episode != null }
             } else {
-                meta.videos.filter { it.season != null && it.season < targetSeason && it.episode != null }
+                meta.videos.filter { it.season != null && it.season < targetSeason && it.season > 0 && it.episode != null }
             }
             val unwatched = episodes.filter { video ->
                 val s = video.season!!

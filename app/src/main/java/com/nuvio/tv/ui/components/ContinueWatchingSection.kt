@@ -55,6 +55,8 @@ import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.tv.material3.Border
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
@@ -64,10 +66,8 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Text
 import com.nuvio.tv.ui.screens.home.ContinueWatchingItem
-import com.nuvio.tv.ui.theme.NuvioColors
 import com.nuvio.tv.ui.theme.NuvioTheme
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.transformations
@@ -76,10 +76,12 @@ import kotlin.math.roundToInt
 import java.util.concurrent.TimeUnit
 import com.nuvio.tv.ui.util.recompositionHighlighter
 import com.nuvio.tv.ui.util.localizeEpisodeTitle
+import com.nuvio.tv.ui.util.rememberLongPressKeyTracker
+import com.nuvio.tv.ui.util.computeAirDateBadgeText
 
-private val CwCardShape = RoundedCornerShape(12.dp)
-private val CwClipShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
-private val BadgeShape = RoundedCornerShape(4.dp)
+private val CwCardShape = RoundedCornerShape(NuvioTheme.radii.md)
+private val CwClipShape = RoundedCornerShape(topStart = NuvioTheme.spacing.md, topEnd = NuvioTheme.spacing.md)
+private val BadgeShape = RoundedCornerShape(NuvioTheme.radii.xs)
 private val CwNewEpisodeBadgeColor = Color(0xFF1D4ED8)
 private val CwNewSeasonBadgeColor = Color(0xFFB45309)
 
@@ -137,14 +139,14 @@ fun ContinueWatchingSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 48.dp, end = 48.dp, bottom = 16.dp),
+                .padding(start = NuvioTheme.spacing.xxxl, end = NuvioTheme.spacing.xxxl, bottom = NuvioTheme.spacing.lg),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = stringResource(R.string.continue_watching),
                 style = MaterialTheme.typography.headlineMedium,
-                color = NuvioColors.TextPrimary
+                color = NuvioTheme.colors.TextPrimary
             )
         }
 
@@ -156,18 +158,32 @@ fun ContinueWatchingSection(
 
         val density = LocalDensity.current
         val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
-        val horizontalBringIntoViewSpec = remember(density, defaultBringIntoViewSpec) {
-            val startPx = with(density) { 48.dp.roundToPx() }
+        val layoutDirection = LocalLayoutDirection.current
+        val isRtl = layoutDirection == LayoutDirection.Rtl
+        val horizontalBringIntoViewSpec = remember(density, defaultBringIntoViewSpec, isRtl) {
+            val startPx = with(density) { NuvioTheme.spacing.xxxl.roundToPx() }
             @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
             object : BringIntoViewSpec {
                 override val scrollAnimationSpec: AnimationSpec<Float> =
                     defaultBringIntoViewSpec.scrollAnimationSpec
                 override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
                     val childSize = kotlin.math.abs(size)
-                    val target = startPx.toFloat()
-                    val space = containerSize - target
-                    val leading = if (childSize <= containerSize && space < childSize) containerSize - childSize else target
-                    return offset - leading
+                    if (isRtl) {
+                        val childSmallerThanParent = childSize <= containerSize
+                        val initialTarget = containerSize - startPx.toFloat()
+                        val targetForTrailingEdge =
+                            if (childSmallerThanParent && initialTarget < childSize) {
+                                childSize
+                            } else {
+                                initialTarget
+                            }
+                        return (offset + size) - targetForTrailingEdge
+                    } else {
+                        val target = startPx.toFloat()
+                        val space = containerSize - target
+                        val leading = if (childSize <= containerSize && space < childSize) containerSize - childSize else target
+                        return offset - leading
+                    }
                 }
             }
         }
@@ -178,8 +194,8 @@ fun ContinueWatchingSection(
                 .fillMaxWidth()
                 .focusRestorer(restoreFocusRequester)
                 .focusGroup(),
-            contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(horizontal = NuvioTheme.spacing.xxxl),
+            horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.lg),
             state = listState
         ) {
             itemsIndexed(
@@ -282,6 +298,7 @@ fun ContinueWatchingCard(
     useEpisodeThumbnails: Boolean = true
 ) {
     var longPressTriggered by remember { mutableStateOf(false) }
+    val longPressKeyTracker = rememberLongPressKeyTracker()
 
     val progress = remember(item) { (item as? ContinueWatchingItem.InProgress)?.progress }
     val nextUp = remember(item) { (item as? ContinueWatchingItem.NextUp)?.info }
@@ -295,7 +312,6 @@ fun ContinueWatchingCard(
             null
         }
     }
-    val strAirsDate = stringResource(R.string.cw_airs_date, nextUp?.airDateLabel ?: "")
     val strUpcoming = stringResource(R.string.cw_upcoming)
     val strNextUp = stringResource(R.string.cw_next_up)
     val strNewEpisode = stringResource(R.string.cw_new_episode)
@@ -308,7 +324,7 @@ fun ContinueWatchingCard(
         if (info.isReleaseAlert) {
             if (info.isNewSeasonRelease) strNewSeason else strNewEpisode
         } else if (!info.hasAired) {
-            info.airDateLabel?.let { strAirsDate } ?: strUpcoming
+            computeAirDateBadgeText(cardContext, info.released, info.airDateLabel) ?: strUpcoming
         } else {
             strNextUp
         }
@@ -379,7 +395,7 @@ fun ContinueWatchingCard(
     val effectiveImageModel = if (usesFallbackImage) fallbackImageModel else imageModel
     val titleText = remember(progress, nextUp) { progress?.name ?: nextUp?.name.orEmpty() }
     val context = LocalContext.current
-    val strAirsDateForEpisode = nextUp?.airDateLabel?.let { stringResource(R.string.cw_airs_date, it) }
+    val strAirsDateForEpisode = computeAirDateBadgeText(context, nextUp?.released, nextUp?.airDateLabel)
     val episodeTitle = remember(progress, nextUp, context, strAirsDateForEpisode) {
         when {
             progress != null -> progress.episodeTitle?.localizeEpisodeTitle(context)
@@ -389,10 +405,10 @@ fun ContinueWatchingCard(
     }
     val density = LocalDensity.current
     val requestWidthPx = remember(cardWidth, density) {
-        with(density) { cardWidth.roundToPx() }
+        with(density) { cardWidth.roundToPx() }.coerceAtLeast(1)
     }
     val requestHeightPx = remember(imageHeight, density) {
-        with(density) { imageHeight.roundToPx() }
+        with(density) { imageHeight.roundToPx() }.coerceAtLeast(1)
     }
     val shouldBlur = blurUnwatchedEpisodes && useEpisodeThumbnails && nextUp != null
     val imageRequest = remember(effectiveImageModel, requestWidthPx, requestHeightPx, shouldBlur) {
@@ -407,7 +423,7 @@ fun ContinueWatchingCard(
             .build()
     }
 
-    val bgColor = NuvioColors.Background
+    val bgColor = NuvioTheme.colors.Background
     val badgeBackground = remember(bgColor, nextUp) {
         when {
             nextUp?.isNewSeasonRelease == true -> CwNewSeasonBadgeColor
@@ -416,7 +432,7 @@ fun ContinueWatchingCard(
         }
     }
     
-    val bgCardColor = NuvioColors.BackgroundCard
+    val bgCardColor = NuvioTheme.colors.BackgroundCard
     val backgroundPainter = remember(bgCardColor) { androidx.compose.ui.graphics.painter.ColorPainter(bgCardColor) }
 
     Card(
@@ -438,14 +454,21 @@ fun ContinueWatchingCard(
                         onLongPress()
                         return@onPreviewKeyEvent true
                     }
-                    val isLongPress = native.isLongPress || native.repeatCount > 0
-                    if (isLongPress && isSelectKey(native.keyCode)) {
+                }
+                if (longPressKeyTracker.handle(native, ::isSelectKey) {
                         longPressTriggered = true
                         onLongPress()
-                        return@onPreviewKeyEvent true
                     }
+                ) {
+                    if (native.action == AndroidKeyEvent.ACTION_UP) {
+                        longPressTriggered = false
+                    }
+                    return@onPreviewKeyEvent true
                 }
-                if (native.action == AndroidKeyEvent.ACTION_UP && longPressTriggered && isSelectKey(native.keyCode)) {
+                if (native.action == AndroidKeyEvent.ACTION_UP &&
+                    longPressTriggered &&
+                    (isSelectKey(native.keyCode) || native.keyCode == AndroidKeyEvent.KEYCODE_MENU)
+                ) {
                     longPressTriggered = false
                     return@onPreviewKeyEvent true
                 }
@@ -458,7 +481,7 @@ fun ContinueWatchingCard(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(2.dp, NuvioColors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                 shape = CwCardShape
             )
         ),
@@ -528,21 +551,21 @@ fun ContinueWatchingCard(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(12.dp)
+                        .padding(NuvioTheme.spacing.md)
                 ) {
                     // Episode info (for series)
                     if (episodeStr != null) {
                         Text(
                             text = episodeStr,
                             style = MaterialTheme.typography.labelMedium,
-                            color = NuvioColors.TextPrimary
+                            color = NuvioTheme.colors.TextPrimary
                         )
                     }
 
                     Text(
                         text = titleText,
                         style = MaterialTheme.typography.titleSmall,
-                        color = NuvioColors.TextPrimary,
+                        color = NuvioTheme.colors.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -563,15 +586,15 @@ fun ContinueWatchingCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp)
+                        .padding(NuvioTheme.spacing.sm)
                         .clip(BadgeShape)
                         .background(badgeBackground)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs)
                 ) {
                     Text(
                         text = badgeText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = NuvioColors.TextPrimary
+                        color = NuvioTheme.colors.TextPrimary
                     )
                 }
 
@@ -579,7 +602,7 @@ fun ContinueWatchingCard(
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .padding(horizontal = 10.dp, vertical = NuvioTheme.spacing.xs)
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(1.5.dp))
                             .height(3.dp)
@@ -590,7 +613,7 @@ fun ContinueWatchingCard(
                                 .fillMaxWidth(progressFraction)
                                 .clip(RoundedCornerShape(1.5.dp))
                                 .height(3.dp)
-                                .background(NuvioColors.Primary)
+                                .background(NuvioTheme.colors.Primary)
                         )
                     }
                 }
@@ -632,8 +655,8 @@ fun ContinueWatchingOptionsDialog(
                 .fillMaxWidth()
                 .focusRequester(detailsFocusRequester),
             colors = ButtonDefaults.colors(
-                containerColor = NuvioColors.BackgroundCard,
-                contentColor = NuvioColors.TextPrimary
+                containerColor = NuvioTheme.colors.BackgroundCard,
+                contentColor = NuvioTheme.colors.TextPrimary
             )
         ) {
             Text(stringResource(R.string.cw_action_go_to_details))
@@ -643,8 +666,8 @@ fun ContinueWatchingOptionsDialog(
             Button(
                 onClick = onPlayManually,
                 colors = ButtonDefaults.colors(
-                    containerColor = NuvioColors.BackgroundCard,
-                    contentColor = NuvioColors.TextPrimary
+                    containerColor = NuvioTheme.colors.BackgroundCard,
+                    contentColor = NuvioTheme.colors.TextPrimary
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -656,8 +679,8 @@ fun ContinueWatchingOptionsDialog(
             Button(
                 onClick = onStartFromBeginning,
                 colors = ButtonDefaults.colors(
-                    containerColor = NuvioColors.BackgroundCard,
-                    contentColor = NuvioColors.TextPrimary
+                    containerColor = NuvioTheme.colors.BackgroundCard,
+                    contentColor = NuvioTheme.colors.TextPrimary
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -668,8 +691,8 @@ fun ContinueWatchingOptionsDialog(
         Button(
             onClick = onRemove,
             colors = ButtonDefaults.colors(
-                containerColor = NuvioColors.BackgroundCard,
-                contentColor = NuvioColors.TextPrimary
+                containerColor = NuvioTheme.colors.BackgroundCard,
+                contentColor = NuvioTheme.colors.TextPrimary
             ),
             modifier = Modifier.fillMaxWidth()
         ) {

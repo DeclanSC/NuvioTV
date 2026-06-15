@@ -25,6 +25,7 @@ import com.nuvio.tv.domain.model.TmdbCollectionSort
 import com.nuvio.tv.domain.model.TmdbCollectionSource
 import com.nuvio.tv.domain.model.TmdbCollectionSourceType
 import com.nuvio.tv.domain.model.TraktCollectionSource
+import com.nuvio.tv.domain.model.enabledAddons
 import com.nuvio.tv.domain.repository.AddonRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +48,10 @@ data class CollectionEditorUiState(
     val folders: List<CollectionFolder> = emptyList(),
     val isLoading: Boolean = true,
     val availableCatalogs: List<AvailableCatalog> = emptyList(),
+    /** Friendly catalog/addon names for every installed addon catalog, keyed by
+     *  `"addonId|type|catalogId"`. Unlike [availableCatalogs], this map is not
+     *  filtered to picker-compatible catalogs. */
+    val addonCatalogInfoByKey: Map<String, AddonCatalogInfo> = emptyMap(),
     val editingFolder: CollectionFolder? = null,
     val showFolderEditor: Boolean = false,
     val showCatalogPicker: Boolean = false,
@@ -86,6 +91,11 @@ data class AvailableCatalog(
     val catalogName: String,
     val genreOptions: List<String> = emptyList(),
     val genreRequired: Boolean = false
+)
+
+data class AddonCatalogInfo(
+    val catalogName: String,
+    val addonName: String
 )
 
 enum class TmdbBuilderMode {
@@ -128,7 +138,7 @@ class CollectionEditorViewModel @Inject constructor(
 
     private fun loadData() {
         viewModelScope.launch {
-            val addons = addonRepository.getInstalledAddons().first()
+            val addons = addonRepository.getInstalledAddons().first().enabledAddons()
             val availableCatalogs = addons.flatMap { addon ->
                 addon.catalogs
                     .filter { catalog ->
@@ -147,6 +157,12 @@ class CollectionEditorViewModel @Inject constructor(
                         )
                     }
             }
+            val addonCatalogInfoByKey = addons.flatMap { addon ->
+                addon.catalogs.map { catalog ->
+                    "${addon.id}|${catalog.apiType}|${catalog.id}" to
+                        AddonCatalogInfo(catalogName = catalog.name, addonName = addon.displayName)
+                }
+            }.toMap()
 
             if (collectionIdArg.isNotBlank()) {
                 val collections = collectionsDataStore.collections.first()
@@ -164,6 +180,7 @@ class CollectionEditorViewModel @Inject constructor(
                             showAllTab = existing.showAllTab,
                             folders = existing.folders,
                             availableCatalogs = availableCatalogs,
+                            addonCatalogInfoByKey = addonCatalogInfoByKey,
                             isLoading = false
                         )
                     }
@@ -176,6 +193,7 @@ class CollectionEditorViewModel @Inject constructor(
                     isNew = true,
                     collectionId = collectionsDataStore.generateId(),
                     availableCatalogs = availableCatalogs,
+                    addonCatalogInfoByKey = addonCatalogInfoByKey,
                     isLoading = false
                 )
             }

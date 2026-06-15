@@ -1,5 +1,7 @@
 package com.nuvio.tv.ui.screens.detail
 
+import com.nuvio.tv.ui.theme.NuvioMotion
+
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -66,7 +68,7 @@ import com.nuvio.tv.domain.model.Meta
 import com.nuvio.tv.domain.model.MDBListRatings
 import com.nuvio.tv.domain.model.Video
 import com.nuvio.tv.domain.model.NextToWatch
-import com.nuvio.tv.ui.theme.NuvioColors
+import com.nuvio.tv.ui.components.ImdbRatingSourceLabel
 import com.nuvio.tv.ui.theme.NuvioTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -78,6 +80,7 @@ import androidx.compose.ui.graphics.painter.Painter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.nuvio.tv.ui.screens.player.PlayerNextEpisodeRules
+import com.nuvio.tv.ui.util.rememberLongPressKeyTracker
 import java.util.Locale
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -166,7 +169,7 @@ fun HeroContentSection(
         label = "logoHeight"
     )
     val logoBottomPadding by animateDpAsState(
-        targetValue = if (isTrailerPlaying) 24.dp else 16.dp,
+        targetValue = if (isTrailerPlaying) NuvioTheme.spacing.xl else NuvioTheme.spacing.lg,
         animationSpec = tween(600),
         label = "logoPadding"
     )
@@ -186,7 +189,7 @@ fun HeroContentSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize(animationSpec = tween(600))
-                .padding(start = 48.dp, end = 48.dp, bottom = 16.dp),
+                .padding(start = NuvioTheme.spacing.xxxl, end = NuvioTheme.spacing.xxxl, bottom = NuvioTheme.spacing.lg),
             verticalArrangement = Arrangement.Bottom
         ) {
             // Logo/Title — always visible during trailer, animates size
@@ -206,14 +209,14 @@ fun HeroContentSection(
                 // Text title hides entirely during trailer
                 AnimatedVisibility(
                     visible = !isTrailerPlaying,
-                    enter = fadeIn(tween(400)),
-                    exit = fadeOut(tween(400))
+                    enter = fadeIn(tween(NuvioMotion.tokens.durations.overlay)),
+                    exit = fadeOut(tween(NuvioMotion.tokens.durations.overlay))
                 ) {
                     Text(
                         text = meta.name,
                         style = MaterialTheme.typography.displayMedium,
-                        color = NuvioColors.TextPrimary,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        color = NuvioTheme.colors.TextPrimary,
+                        modifier = Modifier.padding(bottom = NuvioTheme.spacing.sm)
                     )
                 }
             }
@@ -227,20 +230,20 @@ fun HeroContentSection(
                 Text(
                     text = stringResource(R.string.hero_press_back_trailer),
                     style = MaterialTheme.typography.labelMedium,
-                    color = NuvioColors.TextTertiary,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    color = NuvioTheme.colors.TextTertiary,
+                    modifier = Modifier.padding(bottom = NuvioTheme.spacing.sm)
                 )
             }
 
             // Everything below the logo fades out during trailer
             AnimatedVisibility(
                 visible = !isTrailerPlaying,
-                enter = fadeIn(tween(400)),
-                exit = fadeOut(tween(400))
+                enter = fadeIn(tween(NuvioMotion.tokens.durations.overlay)),
+                exit = fadeOut(tween(NuvioMotion.tokens.durations.overlay))
             ) {
                 Column {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         PlayButton(
@@ -318,7 +321,7 @@ fun HeroContentSection(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
 
                     // Director/Writer line above description
                     if (!creditLine.isNullOrBlank()) {
@@ -330,7 +333,7 @@ fun HeroContentSection(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.fillMaxWidth(0.6f)
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
                     }
 
                     if (mdbListRatings?.isEmpty() == false) {
@@ -343,11 +346,11 @@ fun HeroContentSection(
                         Text(
                             text = meta.description,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = NuvioColors.TextPrimary,
+                            color = NuvioTheme.colors.TextPrimary,
                             overflow = TextOverflow.Clip,
                             modifier = Modifier
                                 .fillMaxWidth(0.6f)
-                                .padding(bottom = 12.dp)
+                                .padding(bottom = NuvioTheme.spacing.md)
                         )
                     }
 
@@ -374,6 +377,7 @@ private fun PlayButton(
     onFocusRestored: () -> Unit = {}
 ) {
     var longPressTriggered by remember { mutableStateOf(false) }
+    val longPressKeyTracker = rememberLongPressKeyTracker()
 
     LaunchedEffect(restoreFocusToken) {
         if (restoreFocusToken > 0 && focusRequester != null) {
@@ -409,23 +413,21 @@ private fun PlayButton(
                         onLongPress()
                         return@onPreviewKeyEvent true
                     }
-
-                    val isSelectKey = native.keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
-                    if ((native.isLongPress || native.repeatCount > 0) && isSelectKey) {
+                }
+                if (onLongPress != null &&
+                    longPressKeyTracker.handle(native, ::isSelectKey) {
                         longPressTriggered = true
                         onLongPress()
-                        return@onPreviewKeyEvent true
                     }
+                ) {
+                    if (native.action == AndroidKeyEvent.ACTION_UP) {
+                        longPressTriggered = false
+                    }
+                    return@onPreviewKeyEvent true
                 }
 
                 if (native.action == AndroidKeyEvent.ACTION_UP && longPressTriggered) {
-                    val isSelectKey = native.keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_MENU
-                    if (isSelectKey) {
+                    if (isSelectOrMenuKey(native.keyCode)) {
                         longPressTriggered = false
                         return@onPreviewKeyEvent true
                     }
@@ -440,19 +442,19 @@ private fun PlayButton(
             focusedContentColor = androidx.compose.ui.graphics.Color.Black
         ),
         shape = ButtonDefaults.shape(
-            shape = RoundedCornerShape(32.dp)
+            shape = RoundedCornerShape(NuvioTheme.spacing.xxl)
         ),
         border = ButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(2.dp, NuvioColors.FocusRing),
-                shape = RoundedCornerShape(32.dp)
+                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                shape = RoundedCornerShape(NuvioTheme.spacing.xxl)
             )
         ),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
+        contentPadding = PaddingValues(horizontal = NuvioTheme.spacing.xl, vertical = 14.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)
         ) {
             Icon(
                 painter = playPainter,
@@ -480,20 +482,20 @@ private fun ActionIconButtonPainter(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier
-            .size(48.dp)
+            .size(NuvioTheme.spacing.xxxl)
             .onFocusChanged { state ->
                 if (state.isFocused) onFocused()
             }
             .focusProperties { up = FocusRequester.Cancel },
         colors = IconButtonDefaults.colors(
-            containerColor = NuvioColors.BackgroundCard,
-            focusedContainerColor = NuvioColors.Secondary,
-            contentColor = NuvioColors.TextPrimary,
-            focusedContentColor = NuvioColors.OnSecondary
+            containerColor = NuvioTheme.colors.BackgroundCard,
+            focusedContainerColor = NuvioTheme.colors.Secondary,
+            contentColor = NuvioTheme.colors.TextPrimary,
+            focusedContentColor = NuvioTheme.colors.OnSecondary
         ),
         border = IconButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(2.dp, NuvioColors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                 shape = CircleShape
             )
         ),
@@ -524,6 +526,7 @@ private fun ActionIconButton(
     onFocused: () -> Unit = {}
 ) {
     var longPressTriggered by remember { mutableStateOf(false) }
+    val longPressKeyTracker = rememberLongPressKeyTracker()
 
     IconButton(
         onClick = {
@@ -535,7 +538,7 @@ private fun ActionIconButton(
         },
         enabled = enabled,
         modifier = Modifier
-            .size(48.dp)
+            .size(NuvioTheme.spacing.xxxl)
             .onFocusChanged { state ->
                 if (state.isFocused) onFocused()
             }
@@ -547,23 +550,21 @@ private fun ActionIconButton(
                         onLongPress()
                         return@onPreviewKeyEvent true
                     }
-
-                    val isSelectKey = native.keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
-                    if ((native.isLongPress || native.repeatCount > 0) && isSelectKey) {
+                }
+                if (onLongPress != null &&
+                    longPressKeyTracker.handle(native, ::isSelectKey) {
                         longPressTriggered = true
                         onLongPress()
-                        return@onPreviewKeyEvent true
                     }
+                ) {
+                    if (native.action == AndroidKeyEvent.ACTION_UP) {
+                        longPressTriggered = false
+                    }
+                    return@onPreviewKeyEvent true
                 }
 
                 if (native.action == AndroidKeyEvent.ACTION_UP && longPressTriggered) {
-                    val isSelectKey = native.keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ||
-                        native.keyCode == AndroidKeyEvent.KEYCODE_MENU
-                    if (isSelectKey) {
+                    if (isSelectOrMenuKey(native.keyCode)) {
                         longPressTriggered = false
                         return@onPreviewKeyEvent true
                     }
@@ -572,14 +573,14 @@ private fun ActionIconButton(
             }
             .focusProperties { up = FocusRequester.Cancel },
         colors = IconButtonDefaults.colors(
-            containerColor = if (selected) selectedContainerColor else NuvioColors.BackgroundCard,
-            focusedContainerColor = NuvioColors.Secondary,
-            contentColor = if (selected) selectedContentColor else NuvioColors.TextPrimary,
-            focusedContentColor = NuvioColors.OnSecondary
+            containerColor = if (selected) selectedContainerColor else NuvioTheme.colors.BackgroundCard,
+            focusedContainerColor = NuvioTheme.colors.Secondary,
+            contentColor = if (selected) selectedContentColor else NuvioTheme.colors.TextPrimary,
+            focusedContentColor = NuvioTheme.colors.OnSecondary
         ),
         border = IconButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(2.dp, NuvioColors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                 shape = CircleShape
             )
         ),
@@ -596,7 +597,7 @@ private fun ActionIconButton(
             icon != null -> Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(NuvioTheme.spacing.xl)
             )
         }
     }
@@ -625,11 +626,6 @@ private fun MetaInfoRow(
     }
     val imdbRating = if (hideImdbRating) null else meta.imdbRating
     val shouldShowImdbRating = imdbRating != null
-    val imdbModel = remember(context) {
-        ImageRequest.Builder(context)
-            .data(com.nuvio.tv.R.raw.imdb_logo_2016)
-            .build()
-    }
     val shouldShowTmdbRating = tmdbRating != null
     val tmdbModel = remember(context) {
         ImageRequest.Builder(context)
@@ -672,10 +668,10 @@ private fun MetaInfoRow(
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)) {
         // Primary row: Genres, Release, Ratings
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Show all genres
@@ -704,13 +700,12 @@ private fun MetaInfoRow(
             imdbRating?.let { rating ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
                 ) {
-                    AsyncImage(
-                        model = imdbModel,
-                        contentDescription = stringResource(R.string.cd_rating),
-                        modifier = Modifier.size(30.dp),
-                        contentScale = ContentScale.Fit
+                    ImdbRatingSourceLabel(
+                        logoModifier = Modifier.size(30.dp),
+                        textStyle = MaterialTheme.typography.labelLarge,
+                        textColor = NuvioTheme.extendedColors.textSecondary
                     )
                     val ratingText = remember(rating) { String.format("%.1f", rating) }
                     Text(
@@ -724,12 +719,12 @@ private fun MetaInfoRow(
             tmdbRating?.let { rating ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
                 ) {
                     AsyncImage(
                         model = tmdbModel,
                         contentDescription = null,
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(NuvioTheme.spacing.xl),
                         contentScale = ContentScale.Fit
                     )
                     val ratingText = remember(rating) { (rating * 10).toInt().toString() }
@@ -745,15 +740,15 @@ private fun MetaInfoRow(
         // Secondary row: Runtime, Age Rating, Status, Country, Language
         if (ageRatingBadge != null || statusBadge != null || secondaryItems.isNotEmpty()) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (ageRatingBadge != null && statusBadge != null) {
                     CombinedMetaBadge(
                         leftText = ageRatingBadge,
-                        leftColor = NuvioColors.TextSecondary,
+                        leftColor = NuvioTheme.colors.TextSecondary,
                         rightText = statusBadge,
-                        rightColor = NuvioColors.TextPrimary
+                        rightColor = NuvioTheme.colors.TextPrimary
                     )
                 } else {
                     ageRatingBadge?.let { badge ->
@@ -762,7 +757,7 @@ private fun MetaInfoRow(
                     statusBadge?.let { badge ->
                         HeroMetaBadge(
                             text = badge,
-                            contentColor = NuvioColors.TextPrimary
+                            contentColor = NuvioTheme.colors.TextPrimary
                         )
                     }
                 }
@@ -773,7 +768,7 @@ private fun MetaInfoRow(
                     Text(
                         text = value,
                         style = MaterialTheme.typography.labelMedium,
-                        color = NuvioColors.TextPrimary
+                        color = NuvioTheme.colors.TextPrimary
                     )
                     if (index < secondaryItems.lastIndex) {
                         MetaInfoDivider()
@@ -787,15 +782,15 @@ private fun MetaInfoRow(
 @Composable
 private fun HeroMetaBadge(
     text: String,
-    contentColor: Color = NuvioColors.TextSecondary
+    contentColor: Color = NuvioTheme.colors.TextSecondary
 ) {
     Box(
         modifier = Modifier
             .border(
-                border = BorderStroke(1.dp, contentColor.copy(alpha = 0.55f)),
+                border = BorderStroke(NuvioTheme.spacing.hairline, contentColor.copy(alpha = 0.55f)),
                 shape = RoundedCornerShape(6.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -810,20 +805,20 @@ private fun HeroMetaBadge(
 @Composable
 private fun CombinedMetaBadge(
     leftText: String,
-    leftColor: Color = NuvioColors.TextSecondary,
+    leftColor: Color = NuvioTheme.colors.TextSecondary,
     rightText: String,
-    rightColor: Color = NuvioColors.TextPrimary
+    rightColor: Color = NuvioTheme.colors.TextPrimary
 ) {
     val dividerColor = leftColor.copy(alpha = 0.55f)
     Row(
         modifier = Modifier
             .border(
-                border = BorderStroke(1.dp, dividerColor),
+                border = BorderStroke(NuvioTheme.spacing.hairline, dividerColor),
                 shape = RoundedCornerShape(6.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)
     ) {
         Text(
             text = leftText,
@@ -833,8 +828,8 @@ private fun CombinedMetaBadge(
         )
         Box(
             modifier = Modifier
-                .width(1.dp)
-                .height(12.dp)
+                .width(NuvioTheme.spacing.hairline)
+                .height(NuvioTheme.spacing.md)
                 .background(dividerColor)
         )
         Text(
@@ -891,7 +886,7 @@ private fun MDBListRatingsRow(ratings: MDBListRatings) {
                 AsyncImage(
                     model = model,
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(NuvioTheme.spacing.xl),
                     contentScale = ContentScale.Fit
                 )
                 Text(
@@ -910,7 +905,7 @@ private fun MDBListRatingsRow(ratings: MDBListRatings) {
                 Image(
                     painter = painterResource(id = com.nuvio.tv.R.drawable.mdblist_audience),
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(NuvioTheme.spacing.xl)
                 )
                 Text(
                     text = formatMDBListRating("audience", rating),
@@ -928,7 +923,7 @@ private fun MDBListRatingsRow(ratings: MDBListRatings) {
                 Image(
                     painter = painterResource(id = com.nuvio.tv.R.drawable.mdblist_metacritic),
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(NuvioTheme.spacing.xl)
                 )
                 Text(
                     text = formatMDBListRating("metacritic", rating),
@@ -938,6 +933,16 @@ private fun MDBListRatingsRow(ratings: MDBListRatings) {
             }
         }
     }
+}
+
+private fun isSelectKey(keyCode: Int): Boolean {
+    return keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
+}
+
+private fun isSelectOrMenuKey(keyCode: Int): Boolean {
+    return isSelectKey(keyCode) || keyCode == AndroidKeyEvent.KEYCODE_MENU
 }
 
 private fun formatMDBListRating(provider: String, rating: Double): String {
@@ -995,7 +1000,7 @@ private fun rememberRawSvgPainter(
     @androidx.annotation.RawRes rawRes: Int
 ): Painter {
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val sizePx = with(density) { 24.dp.roundToPx() }
+    val sizePx = with(density) { NuvioTheme.spacing.xl.roundToPx() }
     val model = remember(rawRes, context, sizePx) {
         ImageRequest.Builder(context)
             .data(rawRes)

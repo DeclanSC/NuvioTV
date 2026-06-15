@@ -5,6 +5,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.exoplayer.ExoPlayer
+import com.nuvio.tv.core.debrid.DirectDebridResolver
+import com.nuvio.tv.core.debrid.DirectDebridStreamPreparer
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.core.torrent.TorrentService
 import com.nuvio.tv.core.torrent.TorrentSettings
@@ -12,6 +14,7 @@ import com.nuvio.tv.data.local.AudioDelayRouteDataStore
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.DeviceLocalPlayerPreferences
 import com.nuvio.tv.data.local.StreamLinkCacheDataStore
+import com.nuvio.tv.data.local.StreamBadgeSettingsDataStore
 import com.nuvio.tv.data.repository.ParentalGuideRepository
 import com.nuvio.tv.data.repository.SkipIntroRepository
 import com.nuvio.tv.data.repository.TraktEpisodeMappingService
@@ -26,6 +29,7 @@ import com.nuvio.tv.data.local.TmdbSettingsDataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -44,6 +48,8 @@ class PlayerViewModel @Inject constructor(
     private val playerSettingsDataStore: PlayerSettingsDataStore,
     private val deviceLocalPlayerPreferences: DeviceLocalPlayerPreferences,
     private val streamLinkCacheDataStore: StreamLinkCacheDataStore,
+    private val streamBadgeSettingsDataStore: StreamBadgeSettingsDataStore,
+    private val bingeGroupCacheDataStore: com.nuvio.tv.data.local.BingeGroupCacheDataStore,
     private val layoutPreferenceDataStore: com.nuvio.tv.data.local.LayoutPreferenceDataStore,
     private val watchedItemsPreferences: com.nuvio.tv.data.local.WatchedItemsPreferences,
     private val trackPreferenceDataStore: com.nuvio.tv.data.local.TrackPreferenceDataStore,
@@ -54,6 +60,11 @@ class PlayerViewModel @Inject constructor(
     private val tmdbMetadataService: TmdbMetadataService,
     private val tmdbSettingsDataStore: TmdbSettingsDataStore,
     private val trailerPlayerPool: com.nuvio.tv.core.player.TrailerPlayerPool,
+    private val directDebridResolver: DirectDebridResolver,
+    private val directDebridStreamPreparer: DirectDebridStreamPreparer,
+    private val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
+    private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
+    private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -78,6 +89,8 @@ class PlayerViewModel @Inject constructor(
         playerSettingsDataStore = playerSettingsDataStore,
         deviceLocalPlayerPreferences = deviceLocalPlayerPreferences,
         streamLinkCacheDataStore = streamLinkCacheDataStore,
+        streamBadgeSettingsDataStore = streamBadgeSettingsDataStore,
+        bingeGroupCacheDataStore = bingeGroupCacheDataStore,
         layoutPreferenceDataStore = layoutPreferenceDataStore,
         watchedItemsPreferences = watchedItemsPreferences,
         trackPreferenceDataStore = trackPreferenceDataStore,
@@ -87,6 +100,9 @@ class PlayerViewModel @Inject constructor(
         tmdbService = tmdbService,
         tmdbMetadataService = tmdbMetadataService,
         tmdbSettingsDataStore = tmdbSettingsDataStore,
+        directDebridResolver = directDebridResolver,
+        directDebridStreamPreparer = directDebridStreamPreparer,
+        streamBadgePresentation = streamBadgePresentation,
         savedStateHandle = savedStateHandle,
         scope = viewModelScope
     )
@@ -173,5 +189,68 @@ class PlayerViewModel @Inject constructor(
         // Allow the trailer player to be re-created when returning to home screen.
         trailerPlayerPool.reclaim()
         super.onCleared()
+    }
+
+    /**
+     * Save watch progress returned by an external player after "Open in External Player".
+     * Uses the controller's current content metadata (contentId, season, episode, etc.)
+     * which are still available since the controller hasn't been cleared yet.
+     */
+    fun saveExternalPlayerProgress(positionMs: Long, durationMs: Long?) {
+        val effectiveDuration = durationMs ?: controller.playbackTimeline.value.duration
+        controller.saveWatchProgressInternal(
+            position = positionMs,
+            duration = effectiveDuration
+        )
+    }
+
+    /**
+     * Launch the current stream in an external player via the centralized tracker.
+     * The tracker handles progress saving independently of PlayerScreen lifecycle.
+     */
+    fun launchInExternalPlayer(activityContext: Context, resumePositionMs: Long) {
+        val url = controller.getCurrentStreamUrl()
+        val metadata = com.nuvio.tv.core.player.ExternalPlaybackMetadata(
+            contentId = controller.contentId ?: return,
+            contentType = controller.contentType ?: "movie",
+            contentName = controller.contentName ?: controller.title,
+            poster = controller.poster,
+            backdrop = controller.backdrop,
+            logo = controller.logo,
+            videoId = controller.currentVideoId ?: controller.contentId ?: return,
+            season = controller.currentSeason,
+            episode = controller.currentEpisode,
+            episodeTitle = controller.currentEpisodeTitle,
+            year = controller.year
+        )
+
+        // Pass already-loaded addon subtitles if forward setting is enabled
+        val subtitleInputs = if (controller.uiState.value.subtitleStyle.preferredLanguage.trim().lowercase() != "none") {
+            val addonSubtitles = controller.uiState.value.addonSubtitles
+            if (addonSubtitles.isNotEmpty()) {
+                addonSubtitles.map {
+                    com.nuvio.tv.core.player.SubtitleInput(
+                        url = it.url,
+                        name = "${it.getDisplayLanguage()} - ${it.addonName}",
+                        lang = it.lang
+                    )
+                }
+            } else null
+        } else null
+
+        // Cache subtitle files locally and launch player in background
+        viewModelScope.launch {
+            val cachedSubtitles = subtitleInputs?.let { subtitleFileCache.cacheSubtitles(it) }
+
+            externalPlaybackTracker.launchPlayer(
+                metadata = metadata,
+                url = url,
+                title = metadata.buildPlayerTitle(),
+                headers = controller.getCurrentHeaders(),
+                resumePositionMs = resumePositionMs,
+                subtitles = cachedSubtitles,
+                context = activityContext
+            )
+        }
     }
 }

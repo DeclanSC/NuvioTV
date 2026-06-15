@@ -2,6 +2,8 @@
 
 package com.nuvio.tv.ui.screens.settings
 
+import com.nuvio.tv.ui.theme.NuvioTheme
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -60,7 +62,6 @@ import com.nuvio.tv.LocaleCache
 import com.nuvio.tv.R
 import com.nuvio.tv.domain.model.AppTheme
 import com.nuvio.tv.ui.components.NuvioDialog
-import com.nuvio.tv.ui.theme.NuvioColors
 import com.nuvio.tv.ui.theme.ThemeColors
 import com.nuvio.tv.ui.theme.getFontFamily
 import kotlinx.coroutines.delay
@@ -95,9 +96,9 @@ fun ThemeSettingsContent(
     val strLanguageSystem = stringResource(R.string.appearance_language_system)
     val supportedLocales = remember(strLanguageSystem) {
         val tags = listOf(
-            "en", "ru", "ar", "bs", "de", "el", "es", "es-419", "hu", "fr", "it", "no", "pl",
-            "pt-PT", "pt-BR", "tr", "cs", "sk", "sl", "sv", "ro", "ja",
-            "nl", "vi", "hi", "lt", "he", "el"
+            "en", "ru", "ar", "bg", "bs", "da", "de", "el", "es", "es-419", "hu", "fr", "in", "it",
+            "no", "pl", "pt-PT", "pt-BR", "tr", "uk", "cs", "sk", "sl", "sv", "ta", "ro", "ja",
+            "nl", "vi", "hi", "lt", "he", "zh-CN", "zh-TW"
         )
         listOf(null to strLanguageSystem) + tags.map { tag ->
             val locale = Locale.forLanguageTag(tag)
@@ -146,7 +147,7 @@ fun ThemeSettingsContent(
                     LazyRow(
                         state = themeRowState,
                         modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = NuvioTheme.spacing.xs, vertical = NuvioTheme.spacing.xs),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         itemsIndexed(
@@ -212,105 +213,45 @@ fun ThemeSettingsContent(
     }
 
     if (showFontDialog) {
-        val fontFocusRequester = remember { FocusRequester() }
-        LaunchedEffect(Unit) { fontFocusRequester.requestFocus() }
-        NuvioDialog(
-            onDismiss = { showFontDialog = false },
+        SettingsSingleChoiceDialog(
             title = stringResource(R.string.appearance_font_dialog_title),
+            options = uiState.availableFonts.map { font ->
+                SettingsPickerOption(font, font.displayName, titleFontFamily = getFontFamily(font))
+            },
+            selectedValue = uiState.selectedFont,
+            onOptionSelected = { font ->
+                viewModel.onEvent(ThemeSettingsEvent.SelectFont(font))
+                showFontDialog = false
+            },
+            onDismiss = { showFontDialog = false },
             width = 400.dp,
-            suppressFirstKeyUp = false
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp)
-            ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp)
-                ) {
-                    val fonts = uiState.availableFonts
-                    for (index in fonts.indices) {
-                        val font = fonts[index]
-                        item {
-                            val isSelected = font == uiState.selectedFont
-                            Button(
-                                onClick = {
-                                    viewModel.onEvent(ThemeSettingsEvent.SelectFont(font))
-                                    showFontDialog = false
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .then(if (index == 0) Modifier.focusRequester(fontFocusRequester) else Modifier),
-                                colors = ButtonDefaults.colors(
-                                    containerColor = if (isSelected) NuvioColors.FocusBackground else NuvioColors.BackgroundCard,
-                                    contentColor = NuvioColors.TextPrimary
-                                )
-                            ) {
-                                Text(
-                                    text = font.displayName,
-                                    fontFamily = getFontFamily(font)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+            maxHeight = 280.dp
+        )
     }
 
     if (showLanguageDialog) {
-        val firstFocusRequester = remember { FocusRequester() }
-        LaunchedEffect(Unit) { firstFocusRequester.requestFocus() }
-        NuvioDialog(
-            onDismiss = { showLanguageDialog = false },
+        SettingsSingleChoiceDialog(
             title = stringResource(R.string.appearance_language_dialog_title),
-            width = 400.dp,
-            suppressFirstKeyUp = false
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp)
-            ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp)
-                ) {
-                    for (index in supportedLocales.indices) {
-                        val (tag, name) = supportedLocales[index]
-                        item {
-                            val isSelected = tag == selectedTag
-                            Button(
-                                onClick = {
-                                    val previousTag = selectedTag
-                                    val newTag = tag ?: ""
-                                    context.getSharedPreferences("app_locale", android.content.Context.MODE_PRIVATE)
-                                        .edit().putString("locale_tag", newTag).apply()
-                                    LocaleCache.localeTag = newTag
-                                    selectedTag = tag
-                                    showLanguageDialog = false
-                                    if (previousTag != tag) {
-                                        pendingLanguageRestart = true
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .then(if (index == 0) Modifier.focusRequester(firstFocusRequester) else Modifier),
-                                colors = ButtonDefaults.colors(
-                                    containerColor = if (isSelected) NuvioColors.FocusBackground else NuvioColors.BackgroundCard,
-                                    contentColor = NuvioColors.TextPrimary
-                                )
-                            ) {
-                                Text(name)
-                            }
-                        }
-                    }
+            options = supportedLocales.map { (tag, name) ->
+                SettingsPickerOption(tag, name)
+            },
+            selectedValue = selectedTag,
+            onOptionSelected = { tag ->
+                val previousTag = selectedTag
+                val newTag = tag ?: ""
+                context.getSharedPreferences("app_locale", android.content.Context.MODE_PRIVATE)
+                    .edit().putString("locale_tag", newTag).apply()
+                LocaleCache.localeTag = newTag
+                selectedTag = tag
+                showLanguageDialog = false
+                if (previousTag != tag) {
+                    pendingLanguageRestart = true
                 }
-            }
-        }
+            },
+            onDismiss = { showLanguageDialog = false },
+            width = 400.dp,
+            maxHeight = 280.dp
+        )
     }
 }
 
@@ -342,13 +283,13 @@ private fun ThemeSwatchChip(
                 }
             },
         colors = CardDefaults.colors(
-            containerColor = NuvioColors.Background,
-            focusedContainerColor = NuvioColors.Background
+            containerColor = NuvioTheme.colors.Background,
+            focusedContainerColor = NuvioTheme.colors.Background
         ),
         border = CardDefaults.border(
             border = Border.None,
             focusedBorder = Border(
-                border = BorderStroke(2.dp, NuvioColors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                 shape = chipShape
             )
         ),
@@ -358,7 +299,7 @@ private fun ThemeSwatchChip(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 12.dp),
+                .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.md),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
@@ -378,12 +319,12 @@ private fun ThemeSwatchChip(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
 
             Text(
                 text = theme.localizedName(),
                 style = MaterialTheme.typography.labelMedium,
-                color = if (isFocused || isSelected) NuvioColors.TextPrimary else NuvioColors.TextSecondary,
+                color = if (isFocused || isSelected) NuvioTheme.colors.TextPrimary else NuvioTheme.colors.TextSecondary,
                 maxLines = 1
             )
         }
