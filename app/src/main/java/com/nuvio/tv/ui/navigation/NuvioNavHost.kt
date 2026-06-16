@@ -979,21 +979,8 @@ fun NuvioNavHost(
                                 }
                             }
                         } else {
-                            val poppedToDetail =
-                                navController.popBackStack(Screen.Detail.route, inclusive = false)
-                            if (poppedToDetail) {
-                                if (isRandom) {
-                                    navController.currentBackStackEntry
-                                        ?.savedStateHandle
-                                        ?.remove<Int>("returnFocusSeason")
-
-                                    navController.currentBackStackEntry
-                                        ?.savedStateHandle
-                                        ?.remove<Int>("returnFocusEpisode")
-                                }
-                            }
-                            val focusSeason = args?.getString("season")?.toIntOrNull()
-                            val focusEpisode = args?.getString("episode")?.toIntOrNull()
+                            val focusSeason = if (isRandom) null else args?.getString("season")?.toIntOrNull()
+                            val focusEpisode = if (isRandom) null else args?.getString("episode")?.toIntOrNull()
                             if (contentId.isNotBlank()) {
                                 val detailEntry = navController.currentBackStack.value
                                     .lastOrNull {

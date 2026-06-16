@@ -457,8 +457,6 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TraktScrobbleItem? {
 
 internal fun PlayerRuntimeController.emitScrobbleStart() {
     if (isRandom) return
-    val item = currentScrobbleItem ?: buildScrobbleItem().also { currentScrobbleItem = it }
-    if (item == null) return
     if (isShortPlaceholderStream()) return
     if (hasRequestedScrobbleStartForCurrentItem) return
 
