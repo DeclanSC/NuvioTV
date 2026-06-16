@@ -2153,12 +2153,10 @@ private fun MetaDetailsContent(
                             onEpisodeManualPlayClick(episode)
                         }
                     } else {
-                        // Movie case (non‑series) – only occurs when manualPlayIsRandom is false
                         heroPlayManualClick()
                     }
                     manualPlayEpisode = null
                     manualPlayIsRandom = false
-                    heroPlayManualClick()
                 },
                 showStartFromBeginning = nextToWatch?.isResume == true,
                 onStartFromBeginning = {
