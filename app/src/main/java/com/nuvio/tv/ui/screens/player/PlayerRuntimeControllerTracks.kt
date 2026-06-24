@@ -213,15 +213,13 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
         if (currentVideoTrackIsLikelyVc1 &&
             !currentVideoTrackSelected &&
             (
-                    currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_TYPE ||
-                            currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_SUBTYPE
-                    ) &&
+                currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_TYPE || currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_SUBTYPE
+            ) &&
             !hasTriedMpvFallbackForVc1 &&
             !isUsingMpvEngine() &&
             (
-                    currentInternalPlayerEngine == InternalPlayerEngine.EXOPLAYER ||
-                            (resolvedAutoPlayerEngine == InternalPlayerEngine.EXOPLAYER)
-                    ) &&
+                currentInternalPlayerEngine == InternalPlayerEngine.EXOPLAYER || (resolvedAutoPlayerEngine == InternalPlayerEngine.EXOPLAYER)
+            ) &&
             autoSwitchInternalPlayerOnErrorEnabled
         ) {
             hasTriedMpvFallbackForVc1 = true
