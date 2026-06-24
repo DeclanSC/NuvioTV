@@ -208,6 +208,39 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
                         "vc1TrackBypassActive=$isVc1TrackSelectionBypassActiveForCurrentPlayback"
             )
         }
+        // Device has no VC-1 decoder at all — software retry and track bypass
+        // won't help. Switch to MPV immediately which handles VC-1 natively.
+        if (currentVideoTrackIsLikelyVc1 &&
+            !currentVideoTrackSelected &&
+            (
+                    currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_TYPE ||
+                            currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_SUBTYPE
+                    ) &&
+            !hasTriedMpvFallbackForVc1 &&
+            !isUsingMpvEngine() &&
+            (
+                    currentInternalPlayerEngine == InternalPlayerEngine.EXOPLAYER ||
+                            (resolvedAutoPlayerEngine == InternalPlayerEngine.EXOPLAYER)
+                    ) &&
+            autoSwitchInternalPlayerOnErrorEnabled
+        ) {
+            hasTriedMpvFallbackForVc1 = true
+
+            Log.w(
+                PlayerRuntimeController.TAG,
+                "VC1_MPV_FALLBACK: switching to MPV support=" +
+                        Util.getFormatSupportString(currentVideoTrackBestSupport)
+            )
+
+            initializePlayer(
+                url = currentStreamUrl,
+                headers = currentHeaders,
+                overrideInternalPlayerEngine = InternalPlayerEngine.MVP_PLAYER,
+                allowEngineFailover = false
+            )
+
+            return
+        }
         if (currentVideoTrackIsLikelyVc1 &&
             !currentVideoTrackSelected &&
             isVc1SoftwareFallbackActiveForCurrentPlayback &&

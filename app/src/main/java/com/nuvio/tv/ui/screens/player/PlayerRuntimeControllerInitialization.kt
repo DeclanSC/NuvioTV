@@ -1589,6 +1589,7 @@ internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     isExperimentalDv7ToDv81ActiveForCurrentPlayback = false
     isVc1SoftwareFallbackActiveForCurrentPlayback = false
     isVc1TrackSelectionBypassActiveForCurrentPlayback = false
+    hasTriedMpvFallbackForVc1 = false
     isSafeAudioModeActiveForCurrentPlayback = false
     isAudioDisabledForCurrentPlayback = false
     dv7ToDv81BridgeVersionForCurrentPlayback = null

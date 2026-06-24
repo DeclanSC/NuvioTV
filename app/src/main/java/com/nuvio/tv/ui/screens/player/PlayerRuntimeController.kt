@@ -421,6 +421,7 @@ class PlayerRuntimeController(
     internal var hasTriedAudioPcmFallback: Boolean = false
     internal var pendingAudioPcmFallbackRebuild: Boolean = false
     internal var hasTriedDv7HevcFallback: Boolean = false
+    internal var hasTriedMpvFallbackForVc1: Boolean = false
     internal var forceDv7ToHevc: Boolean = false
     internal var startupRetryCount: Int = 0
     internal var hasRetriedCurrentStreamAfterUnexpectedNpe: Boolean = false
