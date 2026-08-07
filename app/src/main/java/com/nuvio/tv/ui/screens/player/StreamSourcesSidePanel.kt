@@ -187,15 +187,29 @@ internal fun StreamSourcesSidePanel(
                 }
 
                 else -> {
-                    val currentStreamUrl = uiState.currentStreamUrl
-                    val currentStreamName = uiState.currentStreamName
                     val currentStreamIndex = findCurrentStreamIndex(
                         streams = uiState.sourceFilteredStreams,
-                        currentStreamUrl = currentStreamUrl,
-                        currentStreamName = currentStreamName
+                        currentStreamInfoHash = uiState.currentStreamInfoHash,
+                        currentStreamFileIdx = uiState.currentStreamFileIdx,
+                        currentStreamAddonName = uiState.currentStreamAddonName,
+                        currentStreamUrl = uiState.currentStreamUrl,
+                        currentStreamName = uiState.currentStreamName
                     )
                     val initialFocusStream = uiState.sourceFilteredStreams.getOrNull(currentStreamIndex)
                         ?: uiState.sourceFilteredStreams.firstOrNull()
+
+                    // Occurrence-counted keys: keying by list index made every key change
+                    // when a later addon's results reshuffled the list, disposing all rows
+                    // (including the focused one) and killing D-pad focus.
+                    val streamKeys = remember(uiState.sourceFilteredStreams) {
+                        val seen = mutableMapOf<String, Int>()
+                        uiState.sourceFilteredStreams.map { stream ->
+                            val base = stream.stableKey(0)
+                            val count = seen.getOrDefault(base, 0)
+                            seen[base] = count + 1
+                            stream.stableKey(count)
+                        }
+                    }
 
                     val lastKeyRepeatDispatchRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
 
@@ -234,8 +248,8 @@ internal fun StreamSourcesSidePanel(
                                 }
                             }
                     ) {
-                        itemsIndexed(uiState.sourceFilteredStreams, key = { index, stream ->
-                            stream.stableKey(index)
+                        itemsIndexed(uiState.sourceFilteredStreams, key = { index, _ ->
+                            streamKeys[index]
                         }) { index, stream ->
                             StreamItem(
                                 stream = stream,
@@ -264,34 +278,41 @@ internal fun StreamSourcesSidePanel(
 
 private fun findCurrentStreamIndex(
     streams: List<Stream>,
+    currentStreamInfoHash: String?,
+    currentStreamFileIdx: Int?,
+    currentStreamAddonName: String?,
     currentStreamUrl: String?,
     currentStreamName: String?
 ): Int {
     if (streams.isEmpty()) return -1
 
-    val hasUrl = !currentStreamUrl.isNullOrBlank()
-    val hasName = !currentStreamName.isNullOrBlank()
-
-    if (hasUrl && hasName) {
-        val bothMatch = streams.indexOfFirst { stream ->
-            stream.getStreamUrl() == currentStreamUrl &&
-                stream.getDisplayName().equals(currentStreamName, ignoreCase = true)
+    // Strategy 1: match by infoHash + fileIdx + addonName (most precise for debrid streams)
+    if (!currentStreamInfoHash.isNullOrBlank()) {
+        val hashMatch = streams.indexOfFirst { stream ->
+            val streamInfoHash = stream.infoHash ?: stream.clientResolve?.infoHash
+            val streamFileIdx = stream.fileIdx ?: stream.clientResolve?.fileIdx
+            streamInfoHash.equals(currentStreamInfoHash, ignoreCase = true) &&
+                (currentStreamFileIdx == null || streamFileIdx == currentStreamFileIdx) &&
+                (currentStreamAddonName == null || stream.addonName == currentStreamAddonName)
         }
-        if (bothMatch >= 0) return bothMatch
+        if (hashMatch >= 0) return hashMatch
     }
 
-    if (hasUrl) {
+    // Strategy 2: match by addon + URL (works for non-debrid HTTP streams)
+    if (!currentStreamUrl.isNullOrBlank() && !currentStreamAddonName.isNullOrBlank()) {
         val urlMatch = streams.indexOfFirst { stream ->
-            stream.getStreamUrl() == currentStreamUrl
+            stream.addonName == currentStreamAddonName &&
+                stream.getStreamUrl() == currentStreamUrl
         }
         if (urlMatch >= 0) return urlMatch
     }
 
-    if (hasName) {
-        val nameMatch = streams.indexOfFirst { stream ->
-            stream.getDisplayName().equals(currentStreamName, ignoreCase = true)
+    // Fallback: match by URL only (without addon filter)
+    if (!currentStreamUrl.isNullOrBlank()) {
+        val urlMatch = streams.indexOfFirst { stream ->
+            stream.getStreamUrl() == currentStreamUrl
         }
-        if (nameMatch >= 0) return nameMatch
+        if (urlMatch >= 0) return urlMatch
     }
 
     return -1

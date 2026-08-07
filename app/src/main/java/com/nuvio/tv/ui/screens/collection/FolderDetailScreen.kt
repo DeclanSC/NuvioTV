@@ -2,6 +2,7 @@ package com.nuvio.tv.ui.screens.collection
 
 import com.nuvio.tv.ui.theme.NuvioTheme
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -30,15 +32,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import com.nuvio.tv.ui.util.dpadRepeatThrottle
+import com.nuvio.tv.ui.util.dpadVerticalFastScroll
 import com.nuvio.tv.ui.util.localizedContentType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
@@ -48,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameNanos
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Tab
@@ -63,6 +70,9 @@ import com.nuvio.tv.R
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.ui.components.PosterCardDefaults
 import com.nuvio.tv.ui.components.PosterCardStyle
+import com.nuvio.tv.ui.components.LocalCardDepthStyle
+import com.nuvio.tv.ui.components.nuvioCardDepth
+import com.nuvio.tv.domain.model.CardDepthSurface
 import com.nuvio.tv.ui.screens.home.ClassicHomeContent
 import com.nuvio.tv.ui.screens.home.ContinueWatchingItem
 import com.nuvio.tv.ui.screens.home.GridHomeContent
@@ -73,6 +83,7 @@ import com.nuvio.tv.domain.model.MetaPreview
 import com.nuvio.tv.ui.screens.home.ModernHomeContent
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalTvMaterial3Api::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
@@ -463,15 +474,49 @@ private fun TabbedGridContent(
                 }
                 if (catalogRow != null && catalogRow.isLoading) {
                     item(
-                        span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }
+                        key = "loading_more"
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = NuvioTheme.spacing.xl),
-                            contentAlignment = Alignment.Center
+                        val cardShape = RoundedCornerShape(posterCardStyle.cornerRadius)
+                        val cardDepthStyle = LocalCardDepthStyle.current
+                        Column(
+                            modifier = Modifier.width(posterCardStyle.width)
                         ) {
-                            LoadingIndicator()
+                            Card(
+                                onClick = {},
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(posterCardStyle.height)
+                                    .focusProperties { canFocus = false },
+                                shape = CardDefaults.shape(shape = cardShape),
+                                colors = CardDefaults.colors(
+                                    containerColor = NuvioTheme.colors.BackgroundCard,
+                                    focusedContainerColor = NuvioTheme.colors.BackgroundCard
+                                )
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(cardShape)
+                                        .nuvioCardDepth(
+                                            shape = cardShape,
+                                            surface = CardDepthSurface.POSTERS,
+                                            style = cardDepthStyle
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    LoadingIndicator()
+                                }
+                            }
+                            // Reserve space for title + release date to match ContentCard height
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = NuvioTheme.spacing.sm)
+                                    .height(
+                                        MaterialTheme.typography.titleMedium.lineHeight.value.dp +
+                                            MaterialTheme.typography.labelMedium.lineHeight.value.dp
+                                    )
+                            )
                         }
                     }
                 }
@@ -480,7 +525,7 @@ private fun TabbedGridContent(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun RowsContent(
     uiState: FolderDetailUiState,
@@ -492,15 +537,30 @@ private fun RowsContent(
     onItemFocus: (MetaPreview) -> Unit = {},
     onItemLongPress: (MetaPreview, String) -> Unit = { _, _ -> }
 ) {
-    val sourceTabs = uiState.tabs.filter { !it.isAllTab }
+    val sourceTabs = uiState.tabs.filter { tab ->
+        if (tab.isAllTab) return@filter false
+        // Hide sources that returned zero results after loading completed
+        if (!tab.isLoading && tab.error == null &&
+            tab.catalogRow != null && tab.catalogRow.items.isEmpty()
+        ) return@filter false
+        true
+    }
+    
+    // Nested prefetch: pre-compose cards in nested LazyRows to prevent frame spikes
+    val nestedPrefetchStrategy = remember { LazyListPrefetchStrategy(nestedPrefetchItemCount = 2) }
+    
     val columnListState = rememberLazyListState(
         initialFirstVisibleItemIndex = focusState.verticalScrollIndex,
-        initialFirstVisibleItemScrollOffset = focusState.verticalScrollOffset
+        initialFirstVisibleItemScrollOffset = focusState.verticalScrollOffset,
+        prefetchStrategy = nestedPrefetchStrategy
     )
     val rowStates = remember { mutableMapOf<String, LazyListState>() }
+    val rowFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val rowEntryFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
     val rowFocusedItemIndex = remember { mutableMapOf<String, Int>() }
     val focusedItemByRow = remember { mutableStateMapOf<String, Int>() }
     val currentFocusedRowKey = remember { mutableStateOf(focusState.focusedRowKey) }
+    val folderScope = rememberCoroutineScope()
 
     DisposableEffect(Unit) {
         onDispose {
@@ -567,12 +627,70 @@ private fun RowsContent(
 
     LazyColumn(
         state = columnListState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .focusRestorer()
+            .dpadVerticalFastScroll(
+                scrollableState = columnListState,
+                resolveVerticalLanding = { sign ->
+                    // Pick the item at the leading edge and map to its FocusRequester
+                    val layoutInfo = columnListState.layoutInfo
+                    val visibleItems = layoutInfo.visibleItemsInfo
+                    val lastIdx = layoutInfo.totalItemsCount - 1
+                    val viewportEnd = layoutInfo.viewportEndOffset
+                    val lastItemAtBottom = lastIdx >= 0 &&
+                        visibleItems.lastOrNull { it.index == lastIdx }?.let {
+                            it.offset + it.size <= viewportEnd
+                        } == true
+                    val upwardTopItem = if (sign < 0) {
+                        visibleItems.firstOrNull()?.takeIf {
+                            it.offset > -it.size / 2
+                        }
+                    } else null
+                    val target = when {
+                        lastItemAtBottom -> visibleItems.lastOrNull { it.index == lastIdx }
+                        upwardTopItem != null -> upwardTopItem
+                        else ->
+                            visibleItems.firstOrNull { it.offset >= 0 }
+                                ?: visibleItems.firstOrNull()
+                    }
+                    fun requesterForKey(k: String?): FocusRequester? = when {
+                        k == null -> null
+                        rowEntryFocusRequesters.containsKey(k) -> rowEntryFocusRequesters[k]
+                        else -> {
+                            val baseKey = k.substringBeforeLast('_')
+                            rowEntryFocusRequesters[baseKey]
+                        }
+                    }
+                    val requester = if (target == null) null
+                    else requesterForKey(target.key as? String)
+                        ?: visibleItems.firstNotNullOfOrNull { requesterForKey(it.key as? String) }
+
+                    requester?.let { req ->
+                        folderScope.launch {
+                            repeat(6) {
+                                val ok = runCatching { req.requestFocus(); true }
+                                    .getOrDefault(false)
+                                if (ok) return@launch
+                                withFrameNanos { }
+                            }
+                        }
+                    }
+                    null
+                },
+            ),
         contentPadding = PaddingValues(top = NuvioTheme.spacing.lg, bottom = NuvioTheme.spacing.xxxl),
-        verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)
+        verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xxl)
     ) {
         sourceTabs.forEachIndexed { index, tab ->
-            item(key = "row_${index}_${tab.label}") {
+            // Compute rowKey early so we can use it as item key for focus restoration
+            val catalogRow = tab.catalogRow
+            val rowKey = if (catalogRow != null) {
+                catalogRow.key()
+            } else {
+                "row_${index}_${tab.label}"
+            }
+            item(key = "${rowKey}_$index") {
                 val folderContext = LocalContext.current
                 val localizedTypeLabel = remember(tab.rawType, folderContext) {
                     localizedContentType(folderContext, tab.rawType)
@@ -621,14 +739,13 @@ private fun RowsContent(
                             }
                         }
                     }
-                    tab.catalogRow != null -> {
-                        val catalogRow = tab.catalogRow
-                        val rowKey = "${catalogRow.addonId}_${catalogRow.apiType}_${catalogRow.catalogId}"
+                    catalogRow != null -> {
                         val listState = rowStates.getOrPut(rowKey) {
                             LazyListState(
                                 firstVisibleItemIndex = focusState.catalogRowScrollStates[rowKey] ?: 0
                             )
                         }
+                        val rowFocusRequester = rowFocusRequesters.getOrPut(rowKey) { FocusRequester() }
                         CatalogRowSection(
                             catalogRow = catalogRow,
                             onItemClick = onNavigateToDetail,
@@ -648,6 +765,9 @@ private fun RowsContent(
                             isItemWatched = isItemWatched,
                             onItemFocus = onItemFocus,
                             listState = listState,
+                            rowFocusRequester = rowFocusRequester,
+                            entryFocusRequester = rowEntryFocusRequesters.getOrPut(rowKey) { FocusRequester() },
+                            enableRowFocusRestorer = true,
                             focusedItemIndex = if (
                                 focusState.hasSavedFocus &&
                                 focusState.focusedRowIndex == index
@@ -656,7 +776,7 @@ private fun RowsContent(
                             } else {
                                 -1
                             },
-                            restorerFocusedIndex = -1,
+                            restorerFocusedIndex = rowFocusedItemIndex[rowKey] ?: -1,
                             onItemFocused = { itemIndex ->
                                 currentFocusedRowKey.value = rowKey
                                 rowFocusedItemIndex[rowKey] = itemIndex

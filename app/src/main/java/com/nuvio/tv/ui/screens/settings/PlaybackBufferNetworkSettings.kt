@@ -6,10 +6,15 @@ import com.nuvio.tv.ui.theme.NuvioTheme
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.PlayArrow
@@ -57,33 +62,51 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
     onSetVodCacheSizeMb: (Int) -> Unit,
     onSetUseParallelConnections: (Boolean) -> Unit,
     onSetParallelConnectionCount: (Int) -> Unit,
-    onSetParallelChunkSizeMb: (Int) -> Unit,
+    onSetParallelChunkSizeKb: (Int) -> Unit,
     onSetEnableHttp2: (Boolean) -> Unit,
     onResetNetworkToDefaults: () -> Unit
 ) {
+    val isSupported = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+
     // ── Master toggle: ExoPlayer Native Memory ──
     item(key = "buffer_net_nuvio_performance_mode") {
-        ToggleSettingsItem(
-            icon = Icons.Default.Speed,
-            title = stringResource(R.string.playback_net_nuvio_performance_mode),
-            subtitle = stringResource(R.string.playback_net_nuvio_performance_mode_sub),
-            isChecked = playerSettings.nuvioPerformanceModeEnabled,
-            onCheckedChange = onSetNuvioPerformanceModeEnabled
-        )
-    }
+        var showWarning by remember { mutableStateOf(false) }
 
-    if (playerSettings.nuvioPerformanceModeEnabled) {
-        item(key = "buffer_net_device_memory_info") {
-            val context = LocalContext.current
-            val ramLabel = NuvioExoPlayerPerformanceHelper.getFriendlyRamLabel(context)
-            val safeLimitMb = NuvioExoPlayerPerformanceHelper.getSafeNativeMemoryLimitMb(context)
-            val ramInfoText = stringResource(R.string.playback_net_device_memory_info, ramLabel, safeLimitMb)
-            Text(
-                text = ramInfoText,
-                style = MaterialTheme.typography.bodySmall,
-                color = NuvioTheme.colors.TextSecondary,
-                modifier = Modifier.padding(start = 52.dp, end = NuvioTheme.spacing.lg, top = NuvioTheme.spacing.xs, bottom = NuvioTheme.spacing.sm)
+        Column {
+            ToggleSettingsItem(
+                icon = Icons.Default.Speed,
+                title = stringResource(R.string.playback_net_nuvio_performance_mode),
+                subtitle = stringResource(R.string.playback_net_nuvio_performance_mode_sub),
+                isChecked = isSupported && playerSettings.nuvioPerformanceModeEnabled,
+                enabled = true,
+                onCheckedChange = { enabled ->
+                    if (isSupported) {
+                        onSetNuvioPerformanceModeEnabled(enabled)
+                    } else {
+                        showWarning = true
+                    }
+                }
             )
+
+            if (!isSupported && showWarning) {
+                Text(
+                    text = stringResource(R.string.playback_net_nuvio_performance_mode_not_supported),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFF44336), // Red color
+                    modifier = Modifier.padding(start = 52.dp, end = NuvioTheme.spacing.lg, top = NuvioTheme.spacing.xs, bottom = NuvioTheme.spacing.sm)
+                )
+            } else if (isSupported && playerSettings.nuvioPerformanceModeEnabled) {
+                val context = LocalContext.current
+                val ramLabel = NuvioExoPlayerPerformanceHelper.getFriendlyRamLabel(context)
+                val safeLimitMb = NuvioExoPlayerPerformanceHelper.getSafeNativeMemoryLimitMb(context)
+                val ramInfoText = stringResource(R.string.playback_net_device_memory_info, ramLabel, safeLimitMb)
+                Text(
+                    text = ramInfoText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NuvioTheme.colors.TextSecondary,
+                    modifier = Modifier.padding(start = 52.dp, end = NuvioTheme.spacing.lg, top = NuvioTheme.spacing.xs, bottom = NuvioTheme.spacing.sm)
+                )
+            }
         }
     }
 
@@ -224,7 +247,7 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
         item(key = "buffer_net_target_size") {
             val budgetManaged = playerSettings.bufferBudgetManaged
             val parallelOverheadMb = if (playerSettings.parallelNetworkEnabled && playerSettings.useParallelConnections)
-                MemoryBudget.parallelOverheadMb(playerSettings.parallelConnectionCount, playerSettings.parallelChunkSizeMb) else 0
+                MemoryBudget.parallelOverheadMb(playerSettings.parallelConnectionCount, Math.ceil(playerSettings.parallelChunkSizeKb / 1024.0).toInt()) else 0
             val context = LocalContext.current
             val safeMaxMb = if (playerSettings.nuvioPerformanceModeEnabled) {
                 NuvioExoPlayerPerformanceHelper.getSafeNativeMemoryLimitMb(context)
@@ -481,17 +504,37 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
                 } else {
                     MemoryBudget.maxChunkMb(effectiveBufferMb, playerSettings.parallelConnectionCount)
                 }
-                val chunkSizeMb = playerSettings.parallelChunkSizeMb.coerceAtMost(maxChunkSizeMb)
+                val chunkSizes = listOf(
+                    256 to "256 KB",
+                    512 to "512 KB",
+                    1024 to "1 MB",
+                    2048 to "2 MB",
+                    4096 to "4 MB",
+                    8192 to "8 MB",
+                    16384 to "16 MB",
+                    24576 to "24 MB",
+                    32768 to "32 MB",
+                    49152 to "48 MB",
+                    65536 to "64 MB",
+                    98304 to "96 MB",
+                    131072 to "128 MB"
+                ).filter { it.first <= maxChunkSizeMb * 1024 }
+
+                val currentKb = playerSettings.parallelChunkSizeKb
+                val currentIndex = chunkSizes.indexOfFirst { it.first == currentKb }.coerceAtLeast(0)
+
                 SliderSettingsItem(
                     icon = Icons.Default.Storage,
                     title = stringResource(R.string.playback_net_chunk_size),
                     subtitle = stringResource(R.string.playback_net_chunk_size_sub),
-                    value = chunkSizeMb,
-                    valueText = "$chunkSizeMb MB",
-                    minValue = MemoryBudget.MIN_CHUNK_MB,
-                    maxValue = maxChunkSizeMb,
-                    step = 8,
-                    onValueChange = onSetParallelChunkSizeMb
+                    value = currentIndex,
+                    valueText = chunkSizes.getOrNull(currentIndex)?.second ?: "${currentKb / 1024} MB",
+                    minValue = 0,
+                    maxValue = (chunkSizes.size - 1).coerceAtLeast(0),
+                    step = 1,
+                    onValueChange = { index ->
+                        chunkSizes.getOrNull(index)?.let { onSetParallelChunkSizeKb(it.first) }
+                    }
                 )
             }
         }

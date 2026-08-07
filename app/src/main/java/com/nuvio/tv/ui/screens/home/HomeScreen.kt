@@ -2,6 +2,7 @@ package com.nuvio.tv.ui.screens.home
 
 import com.nuvio.tv.ui.theme.NuvioTheme
 
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import android.util.Log
@@ -51,7 +52,10 @@ import com.nuvio.tv.ui.components.PosterCardDefaults
 import com.nuvio.tv.ui.components.PosterCardStyle
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
+import com.nuvio.tv.core.tracking.LOCAL_LIBRARY_LIST_KEY
+import com.nuvio.tv.core.tracking.supportsMembershipFor
 import com.nuvio.tv.data.local.StartupAuthNotice
+import com.nuvio.tv.ui.components.posteroptions.TrackingRemovalConfirmationDialog
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -199,39 +203,38 @@ fun HomeScreen(
 
     val noAddonsError = stringResource(R.string.home_error_no_addons)
     val noCatalogAddonsError = stringResource(R.string.home_error_no_catalog_addons)
+    val hasAnyContent = uiState.catalogRows.isNotEmpty() ||
+        uiState.continueWatchingItems.isNotEmpty() ||
+        uiState.heroItems.isNotEmpty() ||
+        hasCollectionContent
+    val showStartupLoader = when {
+        !uiState.layoutPreferencesReady -> true
+        uiState.isLoading && !hasAnyContent -> true
+        uiState.error == noAddonsError && uiState.catalogRows.isEmpty() -> !homeStableGateReleased
+        uiState.error == noCatalogAddonsError && uiState.catalogRows.isEmpty() && !hasCollectionContent && !hasHeroContent -> !homeStableGateReleased
+        uiState.error != null && uiState.catalogRows.isEmpty() -> false
+        !uiState.isLoading && !hasAnyContent -> !homeStableGateReleased
+        else -> !homeStableGateReleased || !modernPresentationReady || !showHomeContentWithAnimation
+    }
+
+    // Reports the home screen as fully drawn once it leaves the loading state so startup timing is measurable and post-launch work can be deferred.
+    ReportDrawnWhen { !showStartupLoader }
 
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
-        val hasAnyContent = uiState.catalogRows.isNotEmpty() ||
-            uiState.continueWatchingItems.isNotEmpty() ||
-            uiState.heroItems.isNotEmpty() ||
-            hasCollectionContent
-
         when {
             !uiState.layoutPreferencesReady -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    LoadingIndicator()
-                }
+                Unit
             }
 
             uiState.isLoading && !hasAnyContent -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    LoadingIndicator()
-                }
+                Unit
             }
 
             uiState.error == noAddonsError && uiState.catalogRows.isEmpty() -> {
                 if (!homeStableGateReleased) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        LoadingIndicator()
-                    }
+                    Unit
                 } else {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -248,9 +251,7 @@ fun HomeScreen(
 
             uiState.error == noCatalogAddonsError && uiState.catalogRows.isEmpty() && !hasCollectionContent && !hasHeroContent -> {
                 if (!homeStableGateReleased) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        LoadingIndicator()
-                    }
+                    Unit
                 } else {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -276,12 +277,7 @@ fun HomeScreen(
                 // Don't show "no catalogs" until the stable gate has released —
                 // addons may still be loading from remote after a cache clear.
                 if (!homeStableGateReleased) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        LoadingIndicator()
-                    }
+                    Unit
                 } else {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -300,19 +296,9 @@ fun HomeScreen(
                 // On first launch, wait for stable content before revealing home.
                 // Once released, never go back to loading (homeStableGateReleased is rememberSaveable).
                 if (!homeStableGateReleased) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        LoadingIndicator()
-                    }
+                    Unit
                 } else if (!modernPresentationReady) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        LoadingIndicator()
-                    }
+                    Unit
                 } else {
                     // Flip showHomeContentWithAnimation on the next frame so
                     // AnimatedVisibility can run its enter transition.
@@ -329,12 +315,7 @@ fun HomeScreen(
                     }
                     // Keep loading visible during the single-frame gap before animation starts.
                     if (!showHomeContentWithAnimation) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            LoadingIndicator()
-                        }
+                        Unit
                     }
                     AnimatedVisibility(
                         visible = showHomeContentWithAnimation,
@@ -397,6 +378,15 @@ fun HomeScreen(
             }
         }
 
+        if (showStartupLoader) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                LoadingIndicator()
+            }
+        }
+
         val startupAuthNotice = uiState.startupAuthNotice
         if (startupAuthNotice != null) {
             Box(
@@ -433,7 +423,7 @@ fun HomeScreen(
             title = item.name,
             isInLibrary = uiState.posterLibraryMembership[statusKey] == true,
             isLibraryPending = statusKey in uiState.posterLibraryPending,
-            showManageLists = uiState.librarySourceMode == LibrarySourceMode.TRAKT,
+            showManageLists = uiState.librarySourceMode != LibrarySourceMode.LOCAL,
             isMovie = isMovie,
             isSeries = isSeries,
             isWatched = movieWatchedStatus[statusKey] == true,
@@ -444,7 +434,7 @@ fun HomeScreen(
                 posterOptionsTarget = null
             },
             onToggleLibrary = {
-                if (uiState.librarySourceMode == LibrarySourceMode.TRAKT) {
+                if (uiState.librarySourceMode != LibrarySourceMode.LOCAL) {
                     viewModel.openPosterListPicker(item, selectedPoster.addonBaseUrl)
                 } else {
                     viewModel.togglePosterLibrary(item, selectedPoster.addonBaseUrl)
@@ -463,15 +453,34 @@ fun HomeScreen(
     }
 
     if (uiState.showPosterListPicker) {
+        val localTab = LibraryListTab(
+            key = LOCAL_LIBRARY_LIST_KEY,
+            title = stringResource(R.string.trakt_library_source_nuvio),
+            type = LibraryListTab.Type.WATCHLIST
+        )
+        val contentType = uiState.posterListPickerContentType.orEmpty()
+        val destinationTabs = uiState.libraryListTabs.filter { tab ->
+            tab.supportsMembershipFor(contentType)
+        }
         HomeLibraryListPickerDialog(
             title = uiState.posterListPickerTitle ?: stringResource(R.string.detail_lists_fallback),
-            tabs = uiState.libraryListTabs,
+            tabs = listOf(localTab) + destinationTabs,
             membership = uiState.posterListPickerMembership,
             isPending = uiState.posterListPickerPending,
             error = uiState.posterListPickerError,
             onToggle = { key -> viewModel.togglePosterListPickerMembership(key) },
             onSave = { viewModel.savePosterListPickerMembership() },
             onDismiss = { viewModel.dismissPosterListPicker() }
+        )
+    }
+
+    if (uiState.posterListPickerRemovalConfirmations.isNotEmpty()) {
+        TrackingRemovalConfirmationDialog(
+            itemTitle = uiState.posterListPickerTitle.orEmpty(),
+            confirmations = uiState.posterListPickerRemovalConfirmations,
+            isPending = uiState.posterListPickerPending,
+            onConfirm = viewModel::confirmPosterListPickerRemoval,
+            onDismiss = viewModel::cancelPosterListPickerRemoval
         )
     }
 }

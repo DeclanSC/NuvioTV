@@ -8,6 +8,7 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.tmdb.TmdbCollectionSourceResolver
+import com.nuvio.tv.core.util.hasNoReleaseInfo
 import com.nuvio.tv.core.util.isUnreleased
 import com.nuvio.tv.core.trakt.TraktPublicListSourceResolver
 import com.nuvio.tv.data.trailer.TrailerService
@@ -35,6 +36,7 @@ import com.nuvio.tv.ui.screens.home.HomeRow
 import com.nuvio.tv.ui.screens.home.HomeUiState
 import com.nuvio.tv.ui.screens.home.ModernCarouselRowBuildCache
 import com.nuvio.tv.ui.screens.home.ModernHomePresentationInput
+import com.nuvio.tv.domain.model.PLACEHOLDER_IMAGE_URL
 import com.nuvio.tv.ui.screens.home.buildModernHomePresentation
 import com.nuvio.tv.ui.screens.home.homeItemStatusKey
 import com.nuvio.tv.domain.repository.CatalogRepository
@@ -264,20 +266,22 @@ class FolderDetailViewModel @Inject constructor(
                 }
                 // Generate placeholder CatalogRow with shimmer items for Modern/Classic follow-layout
                 val placeholderRow = if (useShimmerPlaceholders) {
-                    val sourceId = when (source) {
-                        is AddonCatalogCollectionSource -> source.catalogId
-                        is TmdbCollectionSource -> "tmdb_${source.title}"
-                        is TraktCollectionSource -> "trakt_${source.traktListId}"
+                    val (placeholderAddonId, placeholderCatalogId, placeholderBaseUrl) = when (source) {
+                        is AddonCatalogCollectionSource -> {
+                            val baseUrl = addons.find { it.id == source.addonId }?.baseUrl ?: ""
+                            Triple(source.addonId, source.catalogId, baseUrl)
+                        }
+                        is TmdbCollectionSource -> Triple("tmdb", buildTmdbSourceKey(source), "")
+                        is TraktCollectionSource -> Triple("trakt", buildTraktSourceKey(source), "")
                     }
-                    val addonId = (source as? AddonCatalogCollectionSource)?.addonId ?: "placeholder"
                     val apiType = rawType.ifBlank { "movie" }
                     val fakeItems = (0 until 8).map { i ->
                         MetaPreview(
-                            id = "__placeholder_${sourceId}_$i",
+                            id = "__placeholder_${placeholderCatalogId}_$i",
                             type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
                             rawType = apiType,
                             name = " ",
-                            poster = "placeholder://empty",
+                            poster = PLACEHOLDER_IMAGE_URL,
                             posterShape = com.nuvio.tv.domain.model.PosterShape.POSTER,
                             background = null,
                             logo = null,
@@ -288,10 +292,10 @@ class FolderDetailViewModel @Inject constructor(
                         )
                     }
                     CatalogRow(
-                        addonId = addonId,
+                        addonId = placeholderAddonId,
                         addonName = "",
-                        addonBaseUrl = "",
-                        catalogId = sourceId,
+                        addonBaseUrl = placeholderBaseUrl,
+                        catalogId = placeholderCatalogId,
                         catalogName = name,
                         type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
                         rawType = apiType,
@@ -359,7 +363,9 @@ class FolderDetailViewModel @Inject constructor(
         val state = _uiState.value
         if (!hasAllTab) return
         val sourceTabs = state.tabs.drop(1) // skip the All tab
-        val anyLoading = sourceTabs.any { it.isLoading }
+        val anyLoading = sourceTabs.any { tab ->
+            tab.catalogRow?.isLoading == true || tab.isLoading
+        }
         // Only include real loaded rows (exclude placeholder shimmer rows)
         val loadedRows = sourceTabs.mapNotNull { tab ->
             tab.catalogRow?.takeIf { !it.isLoading }
@@ -367,20 +373,42 @@ class FolderDetailViewModel @Inject constructor(
 
         if (loadedRows.isEmpty()) return
 
-        // Round-robin interleave items from all loaded catalog rows
+        val currentAllRow = state.tabs.getOrNull(0)?.catalogRow
+
+        if (anyLoading && currentAllRow != null && currentAllRow.items.isNotEmpty()) {
+            _uiState.update { s ->
+                val tabs = s.tabs.toMutableList()
+                tabs[0] = tabs[0].copy(
+                    isLoading = false,
+                    catalogRow = currentAllRow.copy(isLoading = true)
+                )
+                s.copy(tabs = tabs)
+            }
+            return
+        }
+
+        // All pending loads completed — compute the new batch of items via round-robin
+        // and APPEND them to the existing ALL tab content (stable scroll position).
         val mergedItems = roundRobinMerge(loadedRows.map { it.items })
-        // Use the first loaded row as a template for the merged CatalogRow
+        val existingItems = currentAllRow?.items.orEmpty()
+        val existingIds = existingItems.mapTo(mutableSetOf()) { it.id }
+        val newItems = mergedItems.filter { it.id !in existingIds }
+        val finalItems = existingItems + newItems
+
         val templateRow = loadedRows.first()
+        val hasMore = sourceTabs.any { tab -> tab.catalogRow?.hasMore == true }
         val mergedRow = templateRow.copy(
             catalogName = "All",
-            items = mergedItems
+            items = finalItems,
+            hasMore = hasMore,
+            isLoading = false
         )
 
         _uiState.update { s ->
             val tabs = s.tabs.toMutableList()
             tabs[0] = tabs[0].copy(
                 catalogRow = mergedRow,
-                isLoading = anyLoading
+                isLoading = false
             )
             s.copy(tabs = tabs)
         }
@@ -400,21 +428,20 @@ class FolderDetailViewModel @Inject constructor(
                     tab.catalogRow
                 } else if (tab.isLoading) {
                     // Generate a placeholder CatalogRow with shimmer items
-                    val sourceId = when (val src = tab.source) {
-                        is AddonCatalogCollectionSource -> src.catalogId
-                        is TmdbCollectionSource -> "tmdb_${src.title}"
-                        is TraktCollectionSource -> "trakt_${src.traktListId}"
-                        else -> tab.label
+                    val (phAddonId, phCatalogId, phBaseUrl) = when (val src = tab.source) {
+                        is AddonCatalogCollectionSource -> Triple(src.addonId, src.catalogId, "")
+                        is TmdbCollectionSource -> Triple("tmdb", buildTmdbSourceKey(src), "")
+                        is TraktCollectionSource -> Triple("trakt", buildTraktSourceKey(src), "")
+                        else -> Triple("placeholder", tab.label, "")
                     }
-                    val addonId = (tab.source as? AddonCatalogCollectionSource)?.addonId ?: "placeholder"
                     val apiType = tab.rawType.ifBlank { "movie" }
                     val fakeItems = (0 until 8).map { i ->
                         MetaPreview(
-                            id = "__placeholder_${sourceId}_$i",
+                            id = "__placeholder_${phCatalogId}_$i",
                             type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
                             rawType = apiType,
                             name = " ",
-                            poster = "placeholder://empty",
+                            poster = PLACEHOLDER_IMAGE_URL,
                             posterShape = com.nuvio.tv.domain.model.PosterShape.POSTER,
                             background = null,
                             logo = null,
@@ -425,10 +452,10 @@ class FolderDetailViewModel @Inject constructor(
                         )
                     }
                     CatalogRow(
-                        addonId = addonId,
+                        addonId = phAddonId,
                         addonName = "",
-                        addonBaseUrl = "",
-                        catalogId = sourceId,
+                        addonBaseUrl = phBaseUrl,
+                        catalogId = phCatalogId,
                         catalogName = tab.label,
                         type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
                         rawType = apiType,
@@ -470,6 +497,7 @@ class FolderDetailViewModel @Inject constructor(
                     add(GridItem.SeeAll(
                         catalogId = row.catalogId,
                         addonId = row.addonId,
+                        addonBaseUrl = row.addonBaseUrl,
                         type = row.apiType
                     ))
                 }
@@ -493,6 +521,7 @@ class FolderDetailViewModel @Inject constructor(
                         homeRows = homeRows,
                         catalogRows = allRows,
                         continueWatchingItems = emptyList(),
+                        upcomingItems = emptyList(),
                         useLandscapePosters = state.modernLandscapePostersEnabled,
                         showCatalogTypeSuffix = state.catalogTypeSuffixEnabled,
                         showFullReleaseDate = state.showFullReleaseDate,
@@ -621,7 +650,9 @@ class FolderDetailViewModel @Inject constructor(
                 }
             }
             val tab = _uiState.value.tabs.getOrNull(tabIndex)
-            val catalogName = catalog?.name ?: tab?.label?.takeIf { it != tab?.typeLabel } ?: source.catalogId
+            val catalogName = catalog?.name
+                ?: tab?.label?.takeIf { it.isNotBlank() }
+                ?: source.catalogId
 
             val supportsSkip = catalog?.supportsExtra("skip") ?: false
             val skipStep = catalog?.skipStep() ?: 100
@@ -878,7 +909,10 @@ class FolderDetailViewModel @Inject constructor(
                         _uiState.update { s ->
                             val tabs = s.tabs.toMutableList()
                             val currentRow = tabs.getOrNull(tabIndex)?.catalogRow
-                            val filteredData = result.data.filteredForRelease(s.hideUnreleasedContent)
+                            val filteredData = result.data.filteredForRelease(
+                                hideUnreleased = s.hideUnreleasedContent,
+                                treatMissingDateAsUnreleased = true
+                            )
                             val row = if (append && currentRow != null) {
                                 val existingIds = currentRow.items.map { "${it.apiType}:${it.id}" }.toHashSet()
                                 val newItems = filteredData.items.filter { "${it.apiType}:${it.id}" !in existingIds }
@@ -936,7 +970,10 @@ class FolderDetailViewModel @Inject constructor(
                         _uiState.update { s ->
                             val tabs = s.tabs.toMutableList()
                             val currentRow = tabs.getOrNull(tabIndex)?.catalogRow
-                            val filteredData = result.data.filteredForRelease(s.hideUnreleasedContent)
+                            val filteredData = result.data.filteredForRelease(
+                                hideUnreleased = s.hideUnreleasedContent,
+                                treatMissingDateAsUnreleased = true
+                            )
                             val row = if (append && currentRow != null) {
                                 val existingIds = currentRow.items.map { "${it.apiType}:${it.id}" }.toHashSet()
                                 val newItems = filteredData.items.filter { "${it.apiType}:${it.id}" !in existingIds }
@@ -1009,6 +1046,36 @@ class FolderDetailViewModel @Inject constructor(
             com.nuvio.tv.domain.model.TmdbCollectionMediaType.MOVIE -> appContext.getString(R.string.collections_editor_trakt_movie_list)
             com.nuvio.tv.domain.model.TmdbCollectionMediaType.TV -> appContext.getString(R.string.collections_editor_trakt_series_list)
         }
+    }
+
+    private fun buildTmdbSourceKey(source: TmdbCollectionSource): String {
+        return buildString {
+            append("tmdb_")
+            append(source.sourceType.name.lowercase(java.util.Locale.US))
+            source.tmdbId?.let {
+                append("_")
+                append(it)
+            }
+            append("_")
+            append(source.mediaType.value)
+            append("_")
+            append(source.sortBy.replace('.', '_'))
+            if (source.sourceType == com.nuvio.tv.domain.model.TmdbCollectionSourceType.DISCOVER) {
+                append("_")
+                append(source.filters.hashCode().toUInt().toString(16))
+            }
+        }
+    }
+
+    private fun buildTraktSourceKey(source: TraktCollectionSource): String {
+        return listOf(
+            "trakt",
+            "list",
+            source.traktListId.toString(),
+            source.mediaType.value,
+            source.sortBy.lowercase(java.util.Locale.US),
+            source.sortHow.lowercase(java.util.Locale.US)
+        ).joinToString("_")
     }
 
     private fun String.toCollectionRawType(): String {
@@ -1477,10 +1544,22 @@ class FolderDetailViewModel @Inject constructor(
 
 }
 
-/** Drops unreleased items from a freshly-loaded row when the user toggle is on. */
-private fun CatalogRow.filteredForRelease(hideUnreleased: Boolean): CatalogRow {
+/**
+ * Drops unreleased items from a freshly-loaded row when the user toggle is on.
+ * [treatMissingDateAsUnreleased] additionally drops items that have no release
+ * information at all — used for TMDB- and Trakt-resolved rows, where a missing
+ * release date means the title is unannounced (#2793). Addon rows keep the
+ * lenient behavior because sparse addon metadata often omits dates for
+ * released content.
+ */
+private fun CatalogRow.filteredForRelease(
+    hideUnreleased: Boolean,
+    treatMissingDateAsUnreleased: Boolean = false
+): CatalogRow {
     if (!hideUnreleased) return this
     val today = java.time.LocalDate.now()
-    val filtered = items.filterNot { it.isUnreleased(today) }
+    val filtered = items.filterNot { item ->
+        item.isUnreleased(today) || (treatMissingDateAsUnreleased && item.hasNoReleaseInfo())
+    }
     return if (filtered.size == items.size) this else copy(items = filtered)
 }

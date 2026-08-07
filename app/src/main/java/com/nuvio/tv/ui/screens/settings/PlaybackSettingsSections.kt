@@ -135,6 +135,7 @@ internal fun PlaybackSettingsSections(
     onSetStreamAutoPlayReuseBingeGroup: (Boolean) -> Unit,
     onSetAutoSwitchInternalPlayerOnError: (Boolean) -> Unit,
     onSetExternalPlayerForwardSubtitles: (Boolean) -> Unit,
+    onSetExternalPlayerSendSkipSegments: (Boolean) -> Unit,
     onSetNextEpisodeThresholdPercent: (Float) -> Unit,
     onSetNextEpisodeThresholdMinutesBeforeEnd: (Float) -> Unit,
     onSetStreamAutoPlayTimeoutSeconds: (Int) -> Unit,
@@ -180,7 +181,7 @@ internal fun PlaybackSettingsSections(
     onSetParallelNetworkEnabled: (Boolean) -> Unit,
     onSetUseParallelConnections: (Boolean) -> Unit,
     onSetParallelConnectionCount: (Int) -> Unit,
-    onSetParallelChunkSizeMb: (Int) -> Unit,
+    onSetParallelChunkSizeKb: (Int) -> Unit,
     onSetBufferMinBufferMs: (Int) -> Unit,
     onSetBufferMaxBufferMs: (Int) -> Unit,
     onSetBufferForPlaybackMs: (Int) -> Unit,
@@ -485,6 +486,17 @@ internal fun PlaybackSettingsSections(
                         onFocused = { focusedSection = PlaybackSection.STREAM_SELECTION }
                     )
                 }
+
+                item(key = "external_player_send_skip_segments") {
+                    ToggleSettingsItem(
+                        icon = Icons.Default.Info,
+                        title = stringResource(R.string.playback_external_send_skip_segments),
+                        subtitle = stringResource(R.string.playback_external_send_skip_segments_sub),
+                        isChecked = playerSettings.externalPlayerSendSkipSegments,
+                        onCheckedChange = onSetExternalPlayerSendSkipSegments,
+                        onFocused = { focusedSection = PlaybackSection.STREAM_SELECTION }
+                    )
+                }
             }
 
             item(key = "stream_internal_player_engine") {
@@ -708,7 +720,7 @@ internal fun PlaybackSettingsSections(
                     onResetToDefaults = onResetBufferSettingsToDefaults,
                     onSetUseParallelConnections = onSetUseParallelConnections,
                     onSetParallelConnectionCount = onSetParallelConnectionCount,
-                    onSetParallelChunkSizeMb = onSetParallelChunkSizeMb,
+                    onSetParallelChunkSizeKb = onSetParallelChunkSizeKb,
                     onSetEnableHttp2 = onSetEnableHttp2,
                     onResetNetworkToDefaults = onResetNetworkSettingsToDefaults
                 )

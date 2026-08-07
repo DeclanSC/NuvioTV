@@ -16,6 +16,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.domain.model.ExperienceMode
 import com.nuvio.tv.ui.screens.CatalogSeeAllScreen
@@ -38,7 +39,7 @@ import com.nuvio.tv.ui.screens.settings.PlaybackSettingsScreen
 import com.nuvio.tv.ui.screens.settings.SettingsScreen
 import com.nuvio.tv.ui.screens.settings.SupportersContributorsScreen
 import com.nuvio.tv.ui.screens.settings.ThemeSettingsScreen
-import com.nuvio.tv.ui.screens.settings.TraktScreen
+import com.nuvio.tv.ui.screens.settings.TrackingSettingsScreen
 import com.nuvio.tv.ui.screens.settings.TmdbSettingsScreen
 import com.nuvio.tv.ui.screens.stream.StreamScreen
 import com.nuvio.tv.ui.screens.home.ContinueWatchingItem
@@ -279,6 +280,10 @@ fun NuvioNavHost(
                 returnFocusEpisode = returnFocusEpisode,
                 heroRestoreToken = heroRestoreToken,
                 heroBackdropUrl = heroBackdropUrl,
+                onReturnFocusConsumed = {
+                    savedState["returnFocusSeason"] = null
+                    savedState["returnFocusEpisode"] = null
+                },
                 onBackPress = {
                     if (returnToHomeOnBack) {
                         val popped = navController.popBackStack(Screen.Home.route, inclusive = false)
@@ -568,11 +573,6 @@ fun NuvioNavHost(
                 onStreamSelected = { playbackInfo ->
                     val streamUrl = playbackInfo.url
                         ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
-                    // When both url and infoHash are present (debrid cached torrent),
-                    // prefer the HTTP url and don't pass infoHash — avoids starting
-                    // TorrServer for a stream that's already available via HTTP.
-                    val effectiveInfoHash = if (playbackInfo.url != null) null else playbackInfo.infoHash
-                    val effectiveFileIdx = if (playbackInfo.url != null) null else playbackInfo.fileIdx
                     streamUrl?.let { url ->
                         navController.navigate(
                             Screen.Player.createRoute(
@@ -602,8 +602,8 @@ fun NuvioNavHost(
                                 addonName = playbackInfo.addonName,
                                 addonLogo = playbackInfo.addonLogo,
                                 streamDescription = playbackInfo.streamDescription,
-                                infoHash = effectiveInfoHash,
-                                fileIdx = effectiveFileIdx,
+                                infoHash = playbackInfo.infoHash,
+                                fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
                                 isRandom = isRandom
@@ -614,8 +614,6 @@ fun NuvioNavHost(
                 onAutoPlayResolved = { playbackInfo ->
                     val autoPlayUrl = playbackInfo.url
                         ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
-                    val effectiveInfoHash = if (playbackInfo.url != null) null else playbackInfo.infoHash
-                    val effectiveFileIdx = if (playbackInfo.url != null) null else playbackInfo.fileIdx
                     autoPlayUrl?.let { url ->
                         navController.navigate(
                             Screen.Player.createRoute(
@@ -645,8 +643,8 @@ fun NuvioNavHost(
                                 addonName = playbackInfo.addonName,
                                 addonLogo = playbackInfo.addonLogo,
                                 streamDescription = playbackInfo.streamDescription,
-                                infoHash = effectiveInfoHash,
-                                fileIdx = effectiveFileIdx,
+                                infoHash = playbackInfo.infoHash,
+                                fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
                                 isRandom = isRandom
@@ -793,6 +791,11 @@ fun NuvioNavHost(
                     type = NavType.BoolType
                     nullable = false
                     defaultValue = false
+                },
+                navArgument("launchStartedAtMs") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
                 }
             )
         ) { backStackEntry ->
@@ -1150,7 +1153,7 @@ fun NuvioNavHost(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 showBuiltInHeader = !hideBuiltInHeaders,
-                onNavigateToTrakt = { navController.navigate(Screen.Trakt.route) },
+                onNavigateToTracking = { navController.navigate(Screen.Tracking.route) },
                 onNavigateToAddons = { navController.navigate(Screen.AddonManager.route) },
                 onNavigateToPlugins = { navController.navigate(Screen.Plugins.route) },
                 onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
@@ -1172,8 +1175,8 @@ fun NuvioNavHost(
             )
         }
 
-        composable(Screen.Trakt.route) {
-            TraktScreen(
+        composable(Screen.Tracking.route) {
+            TrackingSettingsScreen(
                 onBackPress = { navController.popBackStack() }
             )
         }
@@ -1290,11 +1293,17 @@ fun NuvioNavHost(
         }
 
         composable(Screen.AuthSignIn.route) {
-            AuthSignInScreen(
-                onBackPress = { navController.popBackStack() },
-                onNavigateToQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
-                onSuccess = { navController.popBackStack() }
-            )
+            if (BuildConfig.SELF_HOSTED) {
+                AuthQrSignInScreen(
+                    onBackPress = { navController.popBackStack() }
+                )
+            } else {
+                AuthSignInScreen(
+                    onBackPress = { navController.popBackStack() },
+                    onNavigateToQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
+                    onSuccess = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.AuthQrSignIn.route) {
