@@ -46,6 +46,7 @@ import com.nuvio.tv.domain.repository.StreamRepository
 import com.nuvio.tv.domain.repository.WatchProgressRepository
 import androidx.media3.session.MediaSession
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,9 +89,12 @@ class PlayerRuntimeController(
     internal val directDebridStreamPreparer: DirectDebridStreamPreparer,
     internal val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
     internal val playbackIssueReportRepository: PlaybackIssueReportRepository,
+    internal val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
     savedStateHandle: SavedStateHandle,
     internal val scope: CoroutineScope
 ) {
+
+    internal val watchedWriteDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     companion object {
         internal const val TAG = "PlayerViewModel"
@@ -296,6 +300,12 @@ class PlayerRuntimeController(
     internal var hidePlayerEngineSwitchInfoJob: Job? = null
     internal var hideSubtitleDelayOverlayJob: Job? = null
     internal var subtitleAutoSyncLoadJob: Job? = null
+    /** ExoPlayer sidecar path: external addon cues without setMediaSource (preserves buffer). */
+    internal var sidecarSubtitleJob: Job? = null
+    internal var activeSidecarSubtitleKey: String? = null
+    internal var sidecarTimedCues: List<androidx.media3.extractor.text.CuesWithTiming> = emptyList()
+    internal var lastSidecarCueSignature: Long? = null
+    internal var exoSubtitleViewRef: WeakReference<androidx.media3.ui.SubtitleView>? = null
     /** Cancels previous TEXT-track bounce jobs when subtitle delay is adjusted repeatedly. */
     internal var subtitleTimingRefreshJob: Job? = null
     internal var nextEpisodeAutoPlayJob: Job? = null
@@ -367,6 +377,7 @@ class PlayerRuntimeController(
     internal val autoSkippedIntervalKeys: MutableSet<String> = mutableSetOf()
     internal var lastActiveSkipType: String? = null
     internal var autoSubtitleSelected: Boolean = false
+    internal var isUserExplicitSubtitleSelection: Boolean = false
     internal var lastSubtitlePreferredLanguage: String? = null
     internal var lastSubtitleSecondaryLanguage: String? = null
     internal var lastUseForcedSubtitles: Boolean? = null

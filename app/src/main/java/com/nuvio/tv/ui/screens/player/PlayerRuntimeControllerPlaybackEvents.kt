@@ -216,7 +216,9 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     val displayPosition = pendingPreviewSeekPosition ?: pos
                     updatePlaybackTimeline(
                         currentPosition = displayPosition,
-                        duration = playerDuration
+                        duration = playerDuration,
+                        bufferedPosition = (pos + (view.demuxerCacheDurationSec() * 1000.0).toLong())
+                            .coerceAtLeast(displayPosition)
                     )
                     val nearEnd = playerDuration > 0L && pos >= (playerDuration - 500L)
                     val naturalEnded = nearEnd && shouldTreatAsNaturalPlaybackCompletion(
@@ -500,7 +502,7 @@ private fun PlayerRuntimeController.buildPlaybackIssuePlaybackSettingsInput(): P
         useLibass = settings.useLibass,
         activePlayerUsesLibass = requestedUseLibassByUser && !isUsingMpvEngine(),
         libassRenderType = settings.libassRenderType.name,
-        addonSubtitleStartupMode = settings.addonSubtitleStartupMode.name,
+        addonSubtitleStartupMode = "SIDECAR",
         externalPlayerForwardSubtitles = settings.externalPlayerForwardSubtitles,
         subtitleOrganizationMode = settings.subtitleOrganizationMode.name,
         loadingOverlayEnabled = settings.loadingOverlayEnabled,
@@ -686,7 +688,7 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
         progressPercent = fallbackPercent
     )
 
-    scope.launch(kotlinx.coroutines.NonCancellable) {
+    scope.launch(kotlinx.coroutines.NonCancellable + watchedWriteDispatcher) {
         val effectiveContentId = watchProgressRepository.normalizeParentContentId(
             parentContentId = progress.contentId,
             videoId = progress.videoId
@@ -700,8 +702,10 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
                     broadcastTrackingHistory = false
                 )
             }
+            runCatching { tvRecommendationManager.onProgressRemoved(normalizedProgress.contentId) }
         } else {
             watchProgressRepository.saveProgress(normalizedProgress, syncRemote = syncRemote)
+            runCatching { tvRecommendationManager.updateSingleWatchNextProgram(normalizedProgress) }
         }
     }
 }

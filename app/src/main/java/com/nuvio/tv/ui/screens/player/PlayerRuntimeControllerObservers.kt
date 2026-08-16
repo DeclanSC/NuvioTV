@@ -6,6 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.nuvio.tv.data.local.FrameRateMatchingMode
+import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.domain.model.enabledAddons
 import kotlinx.coroutines.Job
@@ -36,7 +37,8 @@ internal fun PlayerRuntimeController.buildSubtitleFetchRequest(): SubtitleFetchR
 }
 
 internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
-    onProgress: ((completed: Int, total: Int, addonName: String?) -> Unit)? = null
+    onProgress: ((completed: Int, total: Int, addonName: String?) -> Unit)? = null,
+    onSubtitlesEmitted: ((List<Subtitle>) -> Unit)? = null
 ): List<Subtitle> {
     val request = buildSubtitleFetchRequest() ?: return emptyList()
     val installedAddonOrder = addonRepository.getInstalledAddons().firstOrNull()
@@ -51,11 +53,6 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
         if (result != null) {
             currentVideoHash = result.hash
             if (currentVideoSize == null) currentVideoSize = result.fileSize
-            // Update cache now that we have the computed hash.
-            // For torrent streams we cache the torrent identity (infoHash + fileIdx
-            // + sources) instead of the localhost URL — the URL is ephemeral and
-            // won't survive an app restart, but the identity is enough to
-            // re-establish the stream from scratch on next launch.
             val key = streamCacheKey
             if (key != null) {
                 val state = _uiState.value
@@ -101,7 +98,8 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
         videoHash = currentVideoHash,
         videoSize = currentVideoSize,
         filename = currentFilename,
-        onProgress = onProgress
+        onProgress = onProgress,
+        onSubtitlesEmitted = onSubtitlesEmitted
     )
 }
 
@@ -112,7 +110,12 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles() {
         _uiState.update { it.copy(isLoadingAddonSubtitles = true, addonSubtitlesError = null) }
 
         try {
-            val subtitles = fetchAddonSubtitlesNow()
+            val subtitles = fetchAddonSubtitlesNow(
+                onSubtitlesEmitted = { currentList ->
+                    val visibleSubtitles = filterToVisibleAddonSubtitles(currentList)
+                    _uiState.update { it.copy(addonSubtitles = visibleSubtitles) }
+                }
+            )
             val visibleSubtitles = filterToVisibleAddonSubtitles(subtitles)
             Log.d(PlayerRuntimeController.TAG, "fetchAddonSubtitles done: ${subtitles.size} subs, visible=${visibleSubtitles.size}, persistedPref=${persistedTrackPreference?.subtitle?.javaClass?.simpleName}")
             _uiState.update {
@@ -151,7 +154,11 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles() {
 internal fun PlayerRuntimeController.refreshSubtitlesForCurrentEpisode() {
     val keepDisabled = subtitleDisabledByPersistedPreference ||
         (rememberedTrackPreference?.subtitle == PlayerRuntimeController.RememberedSubtitleSelection.Disabled)
+    if (!isUserExplicitSubtitleSelection && !keepDisabled) {
+        rememberedTrackPreference = rememberedTrackPreference?.copy(subtitle = null)
+    }
     autoSubtitleSelected = keepDisabled
+    isUserExplicitSubtitleSelection = false
     subtitleDisabledByPersistedPreference = keepDisabled
     subtitleAddonRestoredByPersistedPreference = false
     pendingRestoredAddonSubtitle = null
@@ -161,6 +168,7 @@ internal fun PlayerRuntimeController.refreshSubtitlesForCurrentEpisode() {
     pendingAudioSelectionAfterSubtitleRefresh = null
     resetSubtitleAutoSyncState()
     attachedAddonSubtitleKeys = emptySet()
+    stopSidecarAddonSubtitle(clearView = true)
     _uiState.update {
         it.copy(
             addonSubtitles = emptyList(),
@@ -299,7 +307,8 @@ internal fun PlayerRuntimeController.observeSubtitleSettings() {
                     osdClockEnabled = settings.osdClockEnabled,
                     internalPlayerEngine = resolvedInternalPlayerEngine,
                     frameRateMatchingMode = settings.frameRateMatchingMode,
-                    tunnelingEnabled = settings.tunnelingEnabled,
+                    tunnelingEnabled = settings.effectiveTunnelingEnabled &&
+                            resolvedInternalPlayerEngine != InternalPlayerEngine.MVP_PLAYER,
                     persistAudioAmplification = settings.persistAudioAmplification,
                     audioAmplificationDb = resolvedAudioAmplificationDb,
                     centerMixLevelDb = resolvedCenterMixLevelDb
