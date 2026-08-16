@@ -49,8 +49,10 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import coil3.imageLoader
 import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
+import com.nuvio.tv.domain.model.ContinueWatchingCardStyle
 import com.nuvio.tv.domain.model.FocusedPosterTrailerPlaybackTarget
 import com.nuvio.tv.domain.model.MetaPreview
+import com.nuvio.tv.domain.model.isPlaceholder
 import com.nuvio.tv.ui.util.StableList
 import com.nuvio.tv.ui.util.StableMap
 import com.nuvio.tv.ui.util.StableRef
@@ -121,6 +123,8 @@ internal fun ModernHomeRowsList(
     continueWatchingCardHeight: Dp,
     blurUnwatchedEpisodes: Boolean,
     useEpisodeThumbnails: Boolean,
+    continueWatchingCardStyle: ContinueWatchingCardStyle,
+    continueWatchingCornerRadius: Dp,
     pendingRowFocusKey: State<String?>,
     pendingRowFocusIndex: State<Int?>,
     pendingRowFocusNonce: State<Int>,
@@ -155,8 +159,19 @@ internal fun ModernHomeRowsList(
     val context = LocalContext.current
     val layoutDirection = LocalLayoutDirection.current
     val verticalPrefetchImageLoader = context.imageLoader
+    val latestCarouselRowsForImagePrefetch = rememberUpdatedState(carouselRows)
 
-    LaunchedEffect(verticalPrefetchImageLoader, density) {
+    LaunchedEffect(
+        verticalPrefetchImageLoader,
+        verticalRowListState,
+        density,
+        useLandscapePosters,
+        effectiveExpandEnabled,
+        portraitCatalogCardWidth,
+        portraitCatalogCardHeight,
+        landscapeCatalogCardWidth,
+        landscapeCatalogCardHeight
+    ) {
         val prefetchAheadRows = 1
         val prefetchItemsPerRow = 1
         snapshotFlow {
@@ -167,7 +182,8 @@ internal fun ModernHomeRowsList(
             .collect { lastVisibleRowIndex ->
                 withContext(Dispatchers.IO) {
                     for (rowOffset in 1..prefetchAheadRows) {
-                        val row = carouselRows.list.getOrNull(lastVisibleRowIndex + rowOffset) ?: continue
+                        val row = latestCarouselRowsForImagePrefetch.value.list
+                            .getOrNull(lastVisibleRowIndex + rowOffset) ?: continue
                         for (i in 0 until minOf(prefetchItemsPerRow, row.items.list.size)) {
                             val item = row.items.list[i]
                             val url = item.imageUrl ?: continue
@@ -181,6 +197,7 @@ internal fun ModernHomeRowsList(
                             )
                             val wPx = with(density) { metrics.width.roundToPx() }
                             val hPx = with(density) { metrics.height.roundToPx() }
+                            if (wPx <= 0 || hPx <= 0) continue
                             val cacheKey = "${url}_${wPx}x${hPx}"
                             if (verticalPrefetchImageLoader.memoryCache?.get(MemoryCache.Key(cacheKey)) != null) continue
                             verticalPrefetchImageLoader.enqueue(
@@ -213,8 +230,9 @@ internal fun ModernHomeRowsList(
             val rows = latestCarouselRowsForLazy.value
             for (idx in firstVisible.coerceAtLeast(0)..(lastVisible + prefetchAheadForLazy)) {
                 val row = rows.list.getOrNull(idx) ?: continue
-                if (row.isLoading && row.items.list.firstOrNull()?.imageUrl == "placeholder://empty") {
-                    latestOnRequestLazyCatalogLoad.value(row.key)
+                if (row.isLoading && row.items.list.firstOrNull()?.imageUrl.isPlaceholder()) {
+                    val legacyKey = "${row.addonId}_${row.apiType}_${row.catalogId}"
+                    latestOnRequestLazyCatalogLoad.value(legacyKey)
                 }
             }
         }
@@ -235,8 +253,9 @@ internal fun ModernHomeRowsList(
                 val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@collect
                 for (idx in firstVisible.coerceAtLeast(0)..(lastVisible + 1)) {
                     val row = rows.list.getOrNull(idx) ?: continue
-                    if (row.isLoading && row.items.list.firstOrNull()?.imageUrl == "placeholder://empty") {
-                        latestOnRequestLazyCatalogLoad.value(row.key)
+                    if (row.isLoading && row.items.list.firstOrNull()?.imageUrl.isPlaceholder()) {
+                        val legacyKey = "${row.addonId}_${row.apiType}_${row.catalogId}"
+                        latestOnRequestLazyCatalogLoad.value(legacyKey)
                     }
                 }
             }
@@ -345,7 +364,7 @@ internal fun ModernHomeRowsList(
         ) {
             itemsIndexed(
                 items = carouselRows.list,
-                key = { _, row -> row.key },
+                key = { index, row -> "${row.key}_$index" },
                 contentType = { _, row -> row.apiType ?: "modern_home_row" }
             ) { _, row ->
                 val stableOnContinueWatchingOptions = remember(onContinueWatchingOptions) {
@@ -433,6 +452,8 @@ internal fun ModernHomeRowsList(
                     continueWatchingCardHeight = continueWatchingCardHeight,
                     blurUnwatchedEpisodes = blurUnwatchedEpisodes,
                     useEpisodeThumbnails = useEpisodeThumbnails,
+                    continueWatchingCardStyle = continueWatchingCardStyle,
+                    continueWatchingCornerRadius = continueWatchingCornerRadius,
                     onContinueWatchingClick = onContinueWatchingClick,
                     onContinueWatchingOptions = stableOnContinueWatchingOptions,
                     isCatalogItemWatched = isCatalogItemWatched,

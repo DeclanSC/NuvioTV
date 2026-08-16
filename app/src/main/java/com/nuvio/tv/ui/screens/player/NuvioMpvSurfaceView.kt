@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.player
 import android.content.Context
 import android.util.AttributeSet
 import android.util.Log
+import android.view.SurfaceHolder
 import com.nuvio.tv.data.local.MpvHardwareDecodeMode
 import com.nuvio.tv.data.local.SubtitleStyleSettings
 import `is`.xyz.mpv.BaseMPVView
@@ -19,6 +20,8 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     private var initialized = false
     private var hasQueuedInitialMedia = false
     private var lastMediaRequestKey: String? = null
+    private var pendingInitialMediaUrl: String? = null
+    private var pendingInitialStartOption: String? = null
     private var hardwareDecodeMode: MpvHardwareDecodeMode = MpvHardwareDecodeMode.AUTO_SAFE
     private var currentAspectMode: AspectMode = AspectMode.ORIGINAL
     private var pendingAspectRetryCount = 0
@@ -36,17 +39,39 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         initialized = true
     }
 
-    fun setMedia(url: String, headers: Map<String, String>) {
+    fun setMedia(url: String, headers: Map<String, String>, startPositionMs: Long = 0L) {
         ensureInitialized()
-        val requestKey = buildMediaRequestKey(url = url, headers = headers)
+        val requestKey = buildMediaRequestKey(url = url, headers = headers) +
+            "#start=${startPositionMs.coerceAtLeast(0L)}"
         if (hasQueuedInitialMedia && requestKey == lastMediaRequestKey) {
             return
         }
         applyHeaders(headers)
-        if (hasQueuedInitialMedia) {
+        val startOption = startPositionMs
+            .takeIf { it > 0L }
+            ?.let { String.format(Locale.US, "start=%.3f", it / 1000.0) }
+        if (startOption != null && holder.surface?.isValid == true) {
             ensureSurfaceAttachedIfAlreadyAvailable()
-            mpv.command("loadfile", url, "replace")
+            loadFileWithOptions(url, startOption)
+            hasQueuedInitialMedia = true
+            pendingInitialMediaUrl = null
+            pendingInitialStartOption = null
+        } else if (startOption != null) {
+            pendingInitialMediaUrl = url
+            pendingInitialStartOption = startOption
+            hasQueuedInitialMedia = true
+        } else if (hasQueuedInitialMedia) {
+            pendingInitialMediaUrl = null
+            pendingInitialStartOption = null
+            if (holder.surface?.isValid == true) {
+                ensureSurfaceAttachedIfAlreadyAvailable()
+                mpv.command("loadfile", url, "replace")
+            } else {
+                playFile(url)
+            }
         } else {
+            pendingInitialMediaUrl = null
+            pendingInitialStartOption = null
             playFile(url)
             ensureSurfaceAttachedIfAlreadyAvailable()
             hasQueuedInitialMedia = true
@@ -56,10 +81,34 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         scheduleAspectModeRefresh(resetRetryCount = true)
     }
 
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        super.surfaceCreated(holder)
+        val url = pendingInitialMediaUrl ?: return
+        val startOption = pendingInitialStartOption
+        pendingInitialMediaUrl = null
+        pendingInitialStartOption = null
+        if (startOption != null) {
+            loadFileWithOptions(url, startOption)
+        } else {
+            mpv.command("loadfile", url, "replace")
+        }
+    }
+
+    /**
+     * mpv's `loadfile` signature is `<url> [<flags> [<index> [<options>]]]`, so the per-file option
+     * list belongs in the fifth argument. Passing it where `<index>` is expected makes mpv reject
+     * the whole command and stay idle, i.e. resuming at a position would never load the file.
+     */
+    private fun loadFileWithOptions(url: String, options: String) {
+        mpv.command("loadfile", url, "replace", LOADFILE_DEFAULT_INDEX, options)
+    }
+
     fun setMediaUsingLoadfile(url: String, headers: Map<String, String>) {
         ensureInitialized()
         val requestKey = buildMediaRequestKey(url = url, headers = headers)
         applyHeaders(headers)
+        pendingInitialMediaUrl = null
+        pendingInitialStartOption = null
         if (holder.surface?.isValid == true) {
             ensureSurfaceAttachedIfAlreadyAvailable()
             mpv.command("loadfile", url, "replace")
@@ -474,6 +523,8 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         initialized = false
         hasQueuedInitialMedia = false
         lastMediaRequestKey = null
+        pendingInitialMediaUrl = null
+        pendingInitialStartOption = null
     }
 
     override fun initOptions() {
@@ -598,6 +649,8 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "NuvioMpvSurfaceView"
+        /** `loadfile` insertion index; only meaningful for insert-at flags, -1 is mpv's default. */
+        private const val LOADFILE_DEFAULT_INDEX = "-1"
         private const val MPV_COVER_FALLBACK_SCALE = 1.15f
         private const val MPV_MAX_VOLUME_PERCENT = 400.0
         private const val ASPECT_RETRY_DELAY_MS = 120L

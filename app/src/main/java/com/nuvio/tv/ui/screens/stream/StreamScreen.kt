@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -118,7 +119,7 @@ fun StreamScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val playerPreference by viewModel.playerPreference.collectAsStateWithLifecycle(
-        initialValue = PlayerPreference.INTERNAL
+        initialValue = null
     )
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
@@ -173,12 +174,13 @@ fun StreamScreen(
         if (openExternalInBrowser(playbackInfo)) {
             return
         }
+        val preference = playerPreference ?: return
         if (playbackInfo.isTorrent && !p2pEnabled) {
             pendingTorrentPlaybackInfo = playbackInfo
             showP2pConsentDialog = true
             return
         }
-        when (playerPreference) {
+        when (preference) {
             PlayerPreference.INTERNAL -> {
                 launchInternalPlayer(playbackInfo)
             }
@@ -205,9 +207,10 @@ fun StreamScreen(
             showP2pConsentDialog = true
             return
         }
+        val preference = playerPreference ?: return
         if (uiState.isDirectAutoPlayFlow) {
             // Respect player preference even in direct autoplay flow
-            when (playerPreference) {
+            when (preference) {
                 PlayerPreference.EXTERNAL -> {
                     val url = playbackInfo.url ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
                     url?.let { urlString ->
@@ -278,7 +281,10 @@ fun StreamScreen(
     // mask this screen (whether it auto-launches a player or shows the manual list).
     LaunchedEffect(uiState.isLoading) {
         if (!uiState.isLoading) {
-            viewModel.dismissExternalAutoNextOverlay()
+            viewModel.dismissExternalAutoNextOverlay(
+                forceRelease = !uiState.isDirectAutoPlayFlow ||
+                    playerPreference != PlayerPreference.EXTERNAL
+            )
         }
     }
 
@@ -298,7 +304,7 @@ fun StreamScreen(
                 return@LaunchedEffect
             }
             // Respect player preference for cached links too
-            when (playerPreference) {
+            when (playerPreference ?: return@LaunchedEffect) {
                 PlayerPreference.EXTERNAL -> {
                     val url = playbackInfo.url ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
                     url?.let { urlString ->
@@ -333,14 +339,18 @@ fun StreamScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.onEvent(StreamScreenEvent.OnResume)
                 // Always dismiss overlay and stop tracking on resume
                 // covers both ActivityResult path and fire-and-forget path.
                 viewModel.stopExternalPlayerTracking()
+                viewModel.onEvent(StreamScreenEvent.OnResume)
                 if (pendingRestoreOnResume) {
                     restoreFocusedStream = true
                     pendingRestoreOnResume = false
                 }
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                // Backgrounded by the external player: playback behind it is healthy,
+                // so the stuck-loader timeout must not treat it as stuck.
+                viewModel.onHostStopped()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -506,7 +516,10 @@ private fun StreamBackdrop(
         label = "backdrop_image_alpha"
     )
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier
+        .fillMaxSize()
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    ) {
         // Backdrop image
         if (backdropModel != null) {
             AsyncImage(
@@ -1017,8 +1030,14 @@ private fun StreamsList(
     val firstCardFocusRequester = remember { FocusRequester() }
     val lastKeyRepeatDispatchRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     val restoreFocusRequester = remember { FocusRequester() }
+    val streamListState = rememberLazyListState()
     val firstStreamKey = streams.firstOrNull()?.let { first ->
         "${first.addonName}_${first.url ?: first.infoHash ?: first.ytId ?: "unknown"}"
+    }
+
+    // Reset scroll position to the top when the addon filter changes (#2538).
+    LaunchedEffect(selectedAddonFilter) {
+        streamListState.scrollToItem(0)
     }
 
     LaunchedEffect(requestInitialFocus, firstStreamKey) {
@@ -1046,6 +1065,7 @@ private fun StreamsList(
     }
 
     LazyColumn(
+        state = streamListState,
         modifier = Modifier
             .fillMaxSize()
             .padding(NuvioTheme.spacing.lg)

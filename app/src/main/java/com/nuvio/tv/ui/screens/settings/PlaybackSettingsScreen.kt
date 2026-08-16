@@ -241,6 +241,9 @@ fun PlaybackSettingsContent(
                 onSetExternalPlayerForwardSubtitles = { enabled ->
                     coroutineScope.launch { viewModel.setExternalPlayerForwardSubtitles(enabled) }
                 },
+                onSetExternalPlayerSendSkipSegments = { enabled ->
+                    coroutineScope.launch { viewModel.setExternalPlayerSendSkipSegments(enabled) }
+                },
                 onSetNextEpisodeThresholdPercent = { percent ->
                     coroutineScope.launch { viewModel.setNextEpisodeThresholdPercent(percent) }
                 },
@@ -342,8 +345,8 @@ fun PlaybackSettingsContent(
                     coroutineScope.launch { viewModel.setParallelConnectionCount(count) }
                     memoryUsageTrigger++
                 },
-                onSetParallelChunkSizeMb = { mb ->
-                    coroutineScope.launch { viewModel.setParallelChunkSizeMb(mb) }
+                onSetParallelChunkSizeKb = { kb ->
+                    coroutineScope.launch { viewModel.setParallelChunkSizeKb(kb) }
                     memoryUsageTrigger++
                 },
                 onSetBufferMinBufferMs = { ms ->
@@ -425,7 +428,7 @@ fun PlaybackSettingsContent(
             val totalUsageMb = MemoryBudget.totalUsageMb(
                 effectiveBufferMb,
                 playerSettings.parallelConnectionCount,
-                playerSettings.parallelChunkSizeMb,
+                Math.ceil(playerSettings.parallelChunkSizeKb / 1024.0).toInt(),
                 playerSettings.useParallelConnections && playerSettings.parallelNetworkEnabled
             )
 
@@ -852,7 +855,7 @@ internal fun NavigationSettingsItem(
 
 @Composable
 internal fun SliderSettingsItem(
-    icon: ImageVector,
+    icon: ImageVector?,
     title: String,
     value: Int,
     valueText: String,
@@ -862,7 +865,8 @@ internal fun SliderSettingsItem(
     onValueChange: (Int) -> Unit,
     subtitle: String? = null,
     onFocused: () -> Unit = {},
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
     val span = (maxValue - minValue).toFloat()
     val progress = if (span > 0f) (value - minValue).toFloat() / span else 0f
@@ -883,12 +887,13 @@ internal fun SliderSettingsItem(
             if (newValue != value) onValueChange(newValue)
         },
         onFocused = onFocused,
+        modifier = modifier,
     )
 }
 
 @Composable
 internal fun SliderSettingsItem(
-    icon: ImageVector,
+    icon: ImageVector?,
     title: String,
     values: List<Int>,
     selected: Int,
@@ -897,6 +902,7 @@ internal fun SliderSettingsItem(
     subtitle: String? = null,
     onFocused: () -> Unit = {},
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     require(values.isNotEmpty()) { "SliderSettingsItem.values must not be empty" }
 
@@ -922,12 +928,13 @@ internal fun SliderSettingsItem(
             if (newValue != selected) onValueChange(newValue)
         },
         onFocused = onFocused,
+        modifier = modifier,
     )
 }
 
 @Composable
 private fun SliderSettingsItemLayout(
-    icon: ImageVector,
+    icon: ImageVector?,
     title: String,
     valueText: String,
     subtitle: String?,
@@ -936,13 +943,15 @@ private fun SliderSettingsItemLayout(
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
     onFocused: () -> Unit,
+    modifier: Modifier,
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val contentAlpha = if (enabled) 1f else 0.4f
+    val isRtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl   // ✅ ADD it here instead
 
     Card(
         onClick = { },
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .onFocusChanged { state ->
                 val nowFocused = state.isFocused
@@ -956,11 +965,11 @@ private fun SliderSettingsItemLayout(
                 if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onKeyEvent false
                 when (event.nativeKeyEvent.keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        onDecrease()
+                        if (isRtl) onIncrease() else onDecrease()
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        onIncrease()
+                        if (isRtl) onDecrease() else onIncrease()
                         true
                     }
                     else -> false
@@ -988,14 +997,16 @@ private fun SliderSettingsItemLayout(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = (if (isFocused && enabled) NuvioTheme.colors.Primary else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
-                    modifier = Modifier.size(22.dp)
-                )
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = (if (isFocused && enabled) NuvioTheme.colors.Primary else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
+                        modifier = Modifier.size(22.dp)
+                    )
 
-                Spacer(modifier = Modifier.width(NuvioTheme.spacing.lg))
+                    Spacer(modifier = Modifier.width(NuvioTheme.spacing.lg))
+                }
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
