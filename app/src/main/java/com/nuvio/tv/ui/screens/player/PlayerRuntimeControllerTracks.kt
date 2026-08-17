@@ -222,6 +222,39 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
         }
         if (currentVideoTrackIsLikelyVc1 &&
             !currentVideoTrackSelected &&
+            (currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_TYPE || currentVideoTrackBestSupport == C.FORMAT_UNSUPPORTED_SUBTYPE) &&
+            !hasTriedMpvFallbackForVc1 &&
+            !isUsingMpvEngine() &&
+            (currentInternalPlayerEngine == InternalPlayerEngine.EXOPLAYER || (resolvedAutoPlayerEngine == InternalPlayerEngine.EXOPLAYER)) &&
+            autoSwitchInternalPlayerOnErrorEnabled
+        ) {
+            hasTriedMpvFallbackForVc1 = true
+            Log.w(
+                PlayerRuntimeController.TAG,
+                "VC1_MPV_FALLBACK: switching to MPV support=" + Util.getFormatSupportString(currentVideoTrackBestSupport)
+            )
+
+            val vc1FallbackPosition = currentPlaybackPositionMs()?.coerceAtLeast(0L) ?: 0L
+            if (vc1FallbackPosition > 0L) {
+                pendingResumeProgress = null
+                _uiState.update { it.copy(pendingSeekPosition = vc1FallbackPosition) }
+            }
+
+            pendingMpvHardRestartOnNextAttach = true
+            delayMpvResumeSeekUntilVideoTrack = true
+
+            releasePlayer(flushPlaybackState = true)
+            initializePlayer(
+                url = currentStreamUrl,
+                headers = currentHeaders,
+                overrideInternalPlayerEngine = InternalPlayerEngine.MVP_PLAYER,
+                allowEngineFailover = false
+            )
+
+            return
+        }
+        if (currentVideoTrackIsLikelyVc1 &&
+            !currentVideoTrackSelected &&
             isVc1SoftwareFallbackActiveForCurrentPlayback &&
             !isVc1TrackSelectionBypassActiveForCurrentPlayback
         ) {
