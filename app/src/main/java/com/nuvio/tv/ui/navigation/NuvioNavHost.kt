@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -55,6 +56,14 @@ fun NuvioNavHost(
     startDestination: String = Screen.Home.route,
     hideBuiltInHeaders: Boolean = false
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val randomEpisodeSessionTracker = remember {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context,
+            com.nuvio.tv.core.player.RandomEpisodeSessionEntryPoint::class.java
+        ).randomEpisodeSessionTracker()
+    }
+
     fun isStreamToPlayer(from: String, to: String): Boolean {
         return from.startsWith("stream/") && to.startsWith("player/")
     }
@@ -379,6 +388,7 @@ fun NuvioNavHost(
                     )
                 },
                 onRandomPlayClick = { videoId, contentType, contentId, title, poster, backdrop, logo, season, episode, episodeName, genres, year, runtime, _ ->
+                    randomEpisodeSessionTracker.clear()
                     navController.navigate(
                         Screen.Stream.createRoute(
                             videoId = videoId,
@@ -401,6 +411,7 @@ fun NuvioNavHost(
                     )
                 },
                 onRandomManualPlayClick = { videoId, contentType, contentId, title, poster, backdrop, logo, season, episode, episodeName, genres, year, runtime, _ ->
+                    randomEpisodeSessionTracker.clear()
                     navController.navigate(
                         Screen.Stream.createRoute(
                             videoId = videoId,
@@ -879,7 +890,8 @@ fun NuvioNavHost(
                                         contentName = args?.getString("contentName"),
                                         manualSelection = true,
                                         returnToDetailOnBack = returnToDetailOnBack,
-                                        returnToHomeOnBack = returnToHomeOnBack
+                                        returnToHomeOnBack = returnToHomeOnBack,
+                                        isRandom = isRandom
                                     )
                                 ) {
                                     popUpTo(Screen.Stream.route) { inclusive = true }

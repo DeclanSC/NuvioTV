@@ -222,18 +222,21 @@ internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boole
     }
 
     val resolvedNext = if (isRandom) {
-        randomEpisodeSessionHistory.add(season to episode)
+        val resolvedContentId = contentId
+        if (resolvedContentId != null) {
+            randomEpisodeSessionTracker.record(resolvedContentId, season, episode)
+        }
+        val seen = resolvedContentId?.let { randomEpisodeSessionTracker.watchedPairs(it) }.orEmpty()
         val candidates = metaVideos.filter { video ->
             video.season != null && video.season > 0 &&
                     video.episode != null && video.episode > 0 &&
-                    (video.season to video.episode) !in randomEpisodeSessionHistory &&
+                    (video.season to video.episode) !in seen &&
                     PlayerNextEpisodeRules.hasEpisodeAired(video.released)
         }
         if (candidates.isNotEmpty()) {
             candidates.random()
         } else {
-            randomEpisodeSessionHistory.clear()
-            randomEpisodeSessionHistory.add(season to episode)
+            resolvedContentId?.let { randomEpisodeSessionTracker.clear() }
             metaVideos.filter { video ->
                 video.season != null && video.season > 0 &&
                         video.episode != null && video.episode > 0 &&

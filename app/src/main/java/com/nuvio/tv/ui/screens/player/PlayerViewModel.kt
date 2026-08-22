@@ -74,6 +74,7 @@ class PlayerViewModel @Inject constructor(
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     private val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
+    private val randomEpisodeSessionTracker: com.nuvio.tv.core.player.RandomEpisodeSessionTracker,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -117,6 +118,7 @@ class PlayerViewModel @Inject constructor(
         streamBadgePresentation = streamBadgePresentation,
         playbackIssueReportRepository = playbackIssueReportRepository,
         tvRecommendationManager = tvRecommendationManager,
+        randomEpisodeSessionTracker = randomEpisodeSessionTracker,
         savedStateHandle = savedStateHandle,
         scope = viewModelScope
     )
