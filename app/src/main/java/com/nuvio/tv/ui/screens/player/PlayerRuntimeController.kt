@@ -218,7 +218,9 @@ class PlayerRuntimeController(
     fun setIsRandom(random: Boolean) {
         if (isRandom != random) {
             isRandom = random
-            // Re‑evaluate the next episode now that the mode has changed
+            if (!random) {
+                randomEpisodeSessionHistory.clear()
+            }
             recomputeNextEpisode(resetVisibility = true)
         }
     }
@@ -438,6 +440,7 @@ class PlayerRuntimeController(
     internal var audioRouteChangeJob: Job? = null
 
     internal var isRandom: Boolean = false
+    internal val randomEpisodeSessionHistory: MutableSet<Pair<Int, Int>> = mutableSetOf()
     internal var lastBufferLogTimeMs: Long = 0L
     internal var pendingSeekFlush: Boolean = false
     internal var suppressBufferingUiForSeek: Boolean = false
