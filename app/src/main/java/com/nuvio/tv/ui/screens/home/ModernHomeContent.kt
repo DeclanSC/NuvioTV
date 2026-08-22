@@ -95,6 +95,7 @@ private const val WIDE_CARD_HEIGHT_RATIO = 0.4f
 @Composable
 fun ModernHomeContent(
     uiState: HomeUiState,
+    modernPresentation: ModernHomePresentationState = ModernHomePresentationState(),
     focusState: HomeScreenFocusState,
     enrichingItemId: String? = null,
     lastEnrichedPreview: MetaPreview? = null,
@@ -143,7 +144,7 @@ fun ModernHomeContent(
         effectiveExpandEnabled ||
             (effectiveAutoplayEnabled &&
                 trailerPlaybackTarget == FocusedPosterTrailerPlaybackTarget.HERO_MEDIA)
-    val presentation = uiState.modernHomePresentation
+    val presentation = modernPresentation
     val carouselRows = presentation.rows
 
     val hasCollections = remember(uiState.homeRows) {
@@ -162,6 +163,7 @@ fun ModernHomeContent(
             Box(modifier = Modifier.fillMaxSize()) {
                 com.nuvio.tv.ui.components.HeroCarousel(
                     items = uiState.heroItems.asStable(),
+                    showImdbRatings = uiState.homeImdbRatingsVisibility.showRatings,
                     onItemClick = { item ->
                         onNavigateToDetail(item.id, item.apiType, "")
                     },
@@ -363,7 +365,7 @@ fun ModernHomeContent(
 
         if (!restoredFromSavedState.value && focusState.hasSavedFocus) {
             val savedRowKey = focusState.focusedRowKey ?: when {
-                focusState.focusedRowIndex == -1 && uiState.continueWatchingItems.isNotEmpty() -> "continue_watching"
+                focusState.focusedRowIndex == -1 && uiState.continueWatchingEnabled && uiState.continueWatchingItems.isNotEmpty() -> "continue_watching"
                 focusState.focusedRowIndex >= 0 -> rowKeyByGlobalRowIndex.map[focusState.focusedRowIndex]
                 else -> null
             }
@@ -599,7 +601,7 @@ fun ModernHomeContent(
                 }
             }
 
-            val resolvedHeroState = remember(activeCarouselItemState, enrichedPreviews, enrichingItemId, heroItem, uiState.heroEnrichmentEnabled, failedEnrichmentIds) {
+            val resolvedHeroState = remember(activeCarouselItemState, enrichedPreviews, enrichingItemId, heroItem, uiState.heroEnrichmentEnabled, uiState.homeImdbRatingsVisibility, failedEnrichmentIds) {
                 derivedStateOf {
                     val activeCarouselItem = activeCarouselItemState.value
                     val activeItemId = activeCarouselItem?.metaPreview?.id
@@ -617,7 +619,8 @@ fun ModernHomeContent(
                                 ?: activeCarouselItem?.heroPreview?.yearText,
                             runtimeText = formatHeroRuntime(enrichedItem.runtime)
                                 ?: activeCarouselItem?.heroPreview?.runtimeText,
-                            imdbText = enrichedItem.imdbRating?.let { String.format(java.util.Locale.US, "%.1f", it) },
+                            imdbText = enrichedItem.imdbRating
+                                ?.let { String.format(java.util.Locale.US, "%.1f", it) },
                             ageRatingText = enrichedItem.ageRating,
                             statusText = enrichedItem.status,
                             countryText = enrichedItem.country,
@@ -993,6 +996,7 @@ fun ModernHomeContent(
                     else heroSceneStateLambda().enrichmentActive
                 },
                 portraitMode = !useLandscapePosters,
+                showImdbRatings = uiState.homeImdbRatingsVisibility.showRatings,
                 trailerPlaying = {
                     if (isRapidHorizontalNav.value) false
                     else {

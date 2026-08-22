@@ -40,6 +40,9 @@ internal fun PlayerRuntimeController.applyAudioDelay(
     val clampedDelayMs = delayMs.coerceIn(AUDIO_DELAY_MIN_MS, AUDIO_DELAY_MAX_MS)
     audioDelayUs.set(clampedDelayMs.toLong() * 1000L)
     _uiState.update { it.copy(audioDelayMs = clampedDelayMs) }
+    if (isUsingMpvEngine()) {
+        mpvView?.setAudioDelayMs(clampedDelayMs)
+    }
     if (persistForCurrentRoute) {
         persistAudioDelayForCurrentRoute(clampedDelayMs)
     }
@@ -216,7 +219,9 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     val displayPosition = pendingPreviewSeekPosition ?: pos
                     updatePlaybackTimeline(
                         currentPosition = displayPosition,
-                        duration = playerDuration
+                        duration = playerDuration,
+                        bufferedPosition = (pos + (view.demuxerCacheDurationSec() * 1000.0).toLong())
+                            .coerceAtLeast(displayPosition)
                     )
                     val nearEnd = playerDuration > 0L && pos >= (playerDuration - 500L)
                     val naturalEnded = nearEnd && shouldTreatAsNaturalPlaybackCompletion(
@@ -502,7 +507,7 @@ private fun PlayerRuntimeController.buildPlaybackIssuePlaybackSettingsInput(): P
         useLibass = settings.useLibass,
         activePlayerUsesLibass = requestedUseLibassByUser && !isUsingMpvEngine(),
         libassRenderType = settings.libassRenderType.name,
-        addonSubtitleStartupMode = settings.addonSubtitleStartupMode.name,
+        addonSubtitleStartupMode = "SIDECAR",
         externalPlayerForwardSubtitles = settings.externalPlayerForwardSubtitles,
         subtitleOrganizationMode = settings.subtitleOrganizationMode.name,
         loadingOverlayEnabled = settings.loadingOverlayEnabled,
@@ -649,7 +654,11 @@ internal fun PlayerRuntimeController.handleNaturalPlaybackEnded() {
     }
 
     emitCompletionScrobbleStop(progressPercent = 99.5f)
-    saveWatchProgress()
+    if (contentType.equals("cloud", ignoreCase = true)) {
+        saveCloudLibraryProgress(position, duration, completed = true)
+    } else {
+        saveWatchProgress()
+    }
     resetPostPlayStateAfterPlaybackEnded()
 }
 
@@ -667,6 +676,10 @@ internal fun PlayerRuntimeController.cancelNextEpisodeAutoPlayOnFatalError() {
 
 internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, duration: Long, syncRemote: Boolean = true) {
     if (isRandom) return
+    if (contentType.equals("cloud", ignoreCase = true)) {
+        saveCloudLibraryProgress(position, duration, completed = false)
+        return
+    }
     val parentContentId = contentId?.takeIf { it.isNotEmpty() } ?: return
     val parentContentType = contentType?.takeIf { it.isNotEmpty() } ?: return
 
@@ -705,10 +718,29 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
                     broadcastTrackingHistory = false
                 )
             }
+            runCatching { tvRecommendationManager.onProgressRemoved(normalizedProgress.contentId) }
         } else {
             watchProgressRepository.saveProgress(normalizedProgress, syncRemote = syncRemote)
+            runCatching { tvRecommendationManager.updateSingleWatchNextProgram(normalizedProgress) }
         }
     }
+}
+
+private fun PlayerRuntimeController.saveCloudLibraryProgress(
+    position: Long,
+    duration: Long,
+    completed: Boolean
+) {
+    if (!completed && position < 1_000L) return
+    val playbackContext = cloudPlaybackContext ?: return
+    val file = playbackContext.fileForVideoId(currentVideoId) ?: return
+    cloudPlaybackProgressStore.save(
+        item = playbackContext.item,
+        file = file,
+        positionMs = position,
+        durationMs = duration,
+        completed = completed
+    )
 }
 
 internal fun PlayerRuntimeController.currentPlaybackProgressPercent(): Float {
@@ -743,7 +775,9 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TrackingMediaReference
     )
     return reference.takeIf { media ->
         media.hasResolvableIdentity &&
-                (media.kind == TrackingMediaKind.MOVIE || media.episode != null)
+                (media.kind == TrackingMediaKind.MOVIE ||
+                media.kind == TrackingMediaKind.ANIME ||
+                media.episode != null)
     }
 }
 

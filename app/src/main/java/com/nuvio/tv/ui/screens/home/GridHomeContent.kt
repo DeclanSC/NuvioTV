@@ -151,7 +151,7 @@ fun GridHomeContent(
 
     // Offset for section indices: pre-items + continue watching item (if present)
     val gridItems = uiState.gridItems
-    val continueWatchingItems = uiState.continueWatchingItems
+    val continueWatchingItems = if (uiState.continueWatchingEnabled) uiState.continueWatchingItems else emptyList()
     val continueWatchingOffset = if (continueWatchingItems.isNotEmpty()) 1 else 0
 
     LaunchedEffect(gridItems, gridFocusState.hasSavedFocus, gridFocusState.focusedItemKey) {
@@ -385,6 +385,7 @@ fun GridHomeContent(
                             HeroCarousel(
                                 items = gridItem.items.asStable(),
                                 focusRequester = if (shouldRequestInitialFocus) heroFocusRequester else null,
+                                showImdbRatings = uiState.homeImdbRatingsVisibility.showRatings,
                                 onItemClick = remember(onNavigateToDetail) {
                                     { item ->
                                         onNavigateToDetail(
@@ -460,7 +461,7 @@ fun GridHomeContent(
             }
 
             // Emit Upcoming section if SPLIT_UPCOMING mode has upcoming items
-            if (uiState.upcomingItems.isNotEmpty()) {
+            if (uiState.continueWatchingEnabled && uiState.upcomingItems.isNotEmpty()) {
                 item(
                     key = "upcoming_section",
                     span = { GridItemSpan(maxLineSpan) },
@@ -543,6 +544,7 @@ fun GridHomeContent(
                         HeroCarousel(
                             items = gridItem.items.asStable(),
                             focusRequester = if (shouldRequestInitialFocus) heroFocusRequester else null,
+                            showImdbRatings = uiState.homeImdbRatingsVisibility.showRatings,
                             onItemClick = remember(onNavigateToDetail) {
                                 { item ->
                                     onNavigateToDetail(
@@ -777,7 +779,7 @@ private fun SeeAllGridCard(
             ),
             border = CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(posterCardStyle.focusedBorderWidth, NuvioTheme.colors.FocusRing),
+                    border = NuvioTheme.focusRing.border(posterCardStyle.focusedBorderWidth),
                     shape = seeAllCardShape
                 )
             ),
@@ -868,7 +870,7 @@ private fun GridCollectionFolderCard(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(posterCardStyle.focusedBorderWidth, NuvioTheme.colors.FocusRing),
+                border = NuvioTheme.focusRing.border(posterCardStyle.focusedBorderWidth),
                 shape = cardShape
             )
         ),

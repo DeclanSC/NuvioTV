@@ -15,6 +15,10 @@ import com.nuvio.tv.core.player.BitrateAwareLoadControl
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.debrid.DirectDebridStreamPreparer
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackContext
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackProgressStore
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackSessionStore
+import com.nuvio.tv.core.cloud.CloudLibraryRepository
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.core.tracking.TrackingMediaReference
 import com.nuvio.tv.core.tracking.TrackingScrobbleCoordinator
@@ -86,8 +90,12 @@ class PlayerRuntimeController(
     internal val tmdbSettingsDataStore: com.nuvio.tv.data.local.TmdbSettingsDataStore,
     internal val directDebridResolver: DirectDebridResolver,
     internal val directDebridStreamPreparer: DirectDebridStreamPreparer,
+    internal val cloudLibraryRepository: CloudLibraryRepository,
+    internal val cloudPlaybackProgressStore: CloudLibraryPlaybackProgressStore,
+    internal val cloudPlaybackSessionStore: CloudLibraryPlaybackSessionStore,
     internal val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
     internal val playbackIssueReportRepository: PlaybackIssueReportRepository,
+    internal val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
     savedStateHandle: SavedStateHandle,
     internal val scope: CoroutineScope
 ) {
@@ -169,6 +177,7 @@ class PlayerRuntimeController(
     internal val launchStartedAtElapsedMs: Long? = navigationArgs.launchStartedAtMs
     internal val rememberedAudioLanguage: String? = navigationArgs.rememberedAudioLanguage
     internal val rememberedAudioName: String? = navigationArgs.rememberedAudioName
+    internal val cloudSessionToken: String? = navigationArgs.cloudSessionToken
     internal val mediaSourceFactory = PlayerMediaSourceFactory(context.applicationContext)
 
     internal var currentVideoHash: String? = navigationArgs.videoHash
@@ -304,6 +313,12 @@ class PlayerRuntimeController(
     internal var hidePlayerEngineSwitchInfoJob: Job? = null
     internal var hideSubtitleDelayOverlayJob: Job? = null
     internal var subtitleAutoSyncLoadJob: Job? = null
+    /** ExoPlayer sidecar path: external addon cues without setMediaSource (preserves buffer). */
+    internal var sidecarSubtitleJob: Job? = null
+    internal var activeSidecarSubtitleKey: String? = null
+    internal var sidecarTimedCues: List<androidx.media3.extractor.text.CuesWithTiming> = emptyList()
+    internal var lastSidecarCueSignature: Long? = null
+    internal var exoSubtitleViewRef: WeakReference<androidx.media3.ui.SubtitleView>? = null
     /** Cancels previous TEXT-track bounce jobs when subtitle delay is adjusted repeatedly. */
     internal var subtitleTimingRefreshJob: Job? = null
     internal var nextEpisodeAutoPlayJob: Job? = null
@@ -356,6 +371,8 @@ class PlayerRuntimeController(
     /** Back buffer (ms) the user configured, captured at build to restore once DV7 status is known. */
     internal var configuredBackBufferMs: Int = 0
     internal var metaVideos: List<Video> = emptyList()
+    internal var cloudPlaybackContext: CloudLibraryPlaybackContext? =
+        cloudPlaybackSessionStore.load(cloudSessionToken)
     internal var metaGenres: List<String> = emptyList()
     internal var metaCountry: String? = null
     internal var metaFetchJob: Job? = null
@@ -375,6 +392,7 @@ class PlayerRuntimeController(
     internal val autoSkippedIntervalKeys: MutableSet<String> = mutableSetOf()
     internal var lastActiveSkipType: String? = null
     internal var autoSubtitleSelected: Boolean = false
+    internal var isUserExplicitSubtitleSelection: Boolean = false
     internal var lastSubtitlePreferredLanguage: String? = null
     internal var lastSubtitleSecondaryLanguage: String? = null
     internal var lastUseForcedSubtitles: Boolean? = null
@@ -417,6 +435,7 @@ class PlayerRuntimeController(
     internal var rememberAudioDelayPerDeviceEnabled: Boolean = false
     internal var currentAudioOutputRoute: AudioOutputRoute? = null
     internal var audioOutputRouteCallback: AudioDeviceCallback? = null
+    internal var audioRouteChangeJob: Job? = null
 
     internal var isRandom: Boolean = false
     internal var lastBufferLogTimeMs: Long = 0L
@@ -461,6 +480,7 @@ internal var lastProgressUiUpdateUptimeMs: Long = 0L
     internal var hasTriedDv7HevcFallback: Boolean = false
     internal var forceDv7ToHevc: Boolean = false
     internal var startupRetryCount: Int = 0
+    internal var parsingErrorProbeAttempted: Boolean = false
     internal var hasRetriedCurrentStreamAfterUnexpectedNpe: Boolean = false
     internal var hasRetriedCurrentStreamAfterMediaPeriodHolderCrash: Boolean = false
     internal var timeoutRecoveryAttempts: Int = 0
@@ -560,7 +580,11 @@ internal var lastProgressUiUpdateUptimeMs: Long = 0L
         }
         fetchParentalGuide(contentId, contentType, currentSeason, currentEpisode)
         observeSubtitleSettings()
-        fetchMetaDetails(contentId, contentType)
+        if (contentType.equals("cloud", ignoreCase = true)) {
+            initializeCloudPlaybackSequence()
+        } else {
+            fetchMetaDetails(contentId, contentType)
+        }
         observeBlurUnwatchedEpisodes()
         observeEpisodeWatchProgress()
         observeTorrentSettings()

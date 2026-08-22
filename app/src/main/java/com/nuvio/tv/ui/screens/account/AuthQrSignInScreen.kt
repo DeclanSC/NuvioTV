@@ -40,13 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -60,9 +61,11 @@ import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import com.nuvio.tv.R
 import com.nuvio.tv.BuildConfig
+import com.nuvio.tv.R
 import com.nuvio.tv.domain.model.AuthState
+import com.nuvio.tv.ui.components.BrandWordmark
+import com.nuvio.tv.ui.screens.detail.requestFocusAfterFrames
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -86,12 +89,15 @@ fun AuthQrSignInScreen(
     val fullAccount = uiState.authState as? AuthState.FullAccount
     val isSignedIn = fullAccount != null
     val isOnboardingMode = onContinue != null
+    val useEmailLogin = viewModel.usesEmailPasswordLogin
+    val useQrLogin = !useEmailLogin
     val isApproved = remember(uiState.qrLoginStatus) {
         uiState.qrLoginStatus?.contains("approved", ignoreCase = true) == true
     }
     var onboardingTransitionHandled by remember(isOnboardingMode) { mutableStateOf(false) }
     var exitRequested by remember { mutableStateOf(false) }
     var showSignOutConfirmation by remember { mutableStateOf(false) }
+    val loginFocusRequester = remember { FocusRequester() }
 
     fun leaveAuthScreen() {
         exitRequested = true
@@ -124,7 +130,7 @@ fun AuthQrSignInScreen(
 
     LaunchedEffect(uiState.authState, isSignedIn, uiState.qrLoginCode, uiState.isLoading, uiState.error, exitRequested) {
         if (
-            !BuildConfig.SELF_HOSTED &&
+            useQrLogin &&
             !exitRequested &&
             uiState.authState !is AuthState.Loading &&
             !isSignedIn &&
@@ -137,13 +143,13 @@ fun AuthQrSignInScreen(
     }
 
     LaunchedEffect(isSignedIn) {
-        if (!BuildConfig.SELF_HOSTED && isSignedIn && !uiState.qrLoginCode.isNullOrBlank()) {
+        if (useQrLogin && isSignedIn && !uiState.qrLoginCode.isNullOrBlank()) {
             viewModel.clearQrLoginSession()
         }
     }
 
     LaunchedEffect(isApproved, uiState.isLoading) {
-        if (!BuildConfig.SELF_HOSTED && isApproved && !uiState.isLoading) {
+        if (useQrLogin && isApproved && !uiState.isLoading) {
             viewModel.exchangeQrLogin()
         }
     }
@@ -183,7 +189,7 @@ fun AuthQrSignInScreen(
                     .padding(start = 56.dp, end = 56.dp),
                 isSignedIn = isSignedIn,
                 fullAccount = fullAccount,
-                selfHosted = BuildConfig.SELF_HOSTED
+                useEmailLogin = useEmailLogin
             )
 
             AuthQrLoginPane(
@@ -202,7 +208,7 @@ fun AuthQrSignInScreen(
                 uiState = uiState,
                 isSignedIn = isSignedIn,
                 isOnboardingMode = isOnboardingMode,
-                selfHosted = BuildConfig.SELF_HOSTED,
+                useEmailLogin = useEmailLogin,
                 remainingMillis = remainingMillis,
                 onSignIn = viewModel::signIn,
                 onRefreshOrSignOut = {
@@ -218,9 +224,23 @@ fun AuthQrSignInScreen(
                     } else {
                         leaveAuthScreen()
                     }
-                }
+                },
+                initialFocusRequester = loginFocusRequester
             )
         }
+
+        if (BuildConfig.FEATURE_CUSTOM_SERVER_CONNECTIONS_ENABLED) {
+            ServerOptionsMenuHost(
+                viewModel = hiltViewModel(),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(28.dp)
+            )
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loginFocusRequester.requestFocusAfterFrames(frames = 3)
     }
 
     if (showSignOutConfirmation) {
@@ -239,15 +259,14 @@ private fun AuthQrBrandPanel(
     modifier: Modifier,
     isSignedIn: Boolean,
     fullAccount: AuthState.FullAccount?,
-    selfHosted: Boolean
+    useEmailLogin: Boolean
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.Center
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.app_logo_wordmark),
+        BrandWordmark(
             contentDescription = stringResource(R.string.cd_nuvio),
             modifier = Modifier.height(60.dp),
             contentScale = ContentScale.Fit
@@ -267,7 +286,7 @@ private fun AuthQrBrandPanel(
         Text(
             text = if (isSignedIn) {
                 stringResource(R.string.auth_qr_connected)
-            } else if (selfHosted) {
+            } else if (useEmailLogin) {
                 stringResource(R.string.auth_email_hint)
             } else {
                 stringResource(R.string.auth_qr_phone_hint)
@@ -303,12 +322,15 @@ private fun AuthQrLoginPane(
     uiState: AccountUiState,
     isSignedIn: Boolean,
     isOnboardingMode: Boolean,
-    selfHosted: Boolean,
+    useEmailLogin: Boolean,
     remainingMillis: Long,
     onSignIn: (String, String) -> Unit,
     onRefreshOrSignOut: () -> Unit,
-    onBackOrContinue: () -> Unit
+    onBackOrContinue: () -> Unit,
+    initialFocusRequester: FocusRequester
 ) {
+    val focusEmail = useEmailLogin && !isSignedIn
+    val focusMainAction = !focusEmail && !uiState.isLoading
     Column(
         modifier = modifier.padding(horizontal = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -327,7 +349,7 @@ private fun AuthQrLoginPane(
         Text(
             text = if (isSignedIn) {
                 stringResource(R.string.auth_qr_synced_data)
-            } else if (selfHosted) {
+            } else if (useEmailLogin) {
                 stringResource(R.string.auth_email_instruction)
             } else {
                 stringResource(R.string.auth_qr_scan_instruction)
@@ -352,10 +374,11 @@ private fun AuthQrLoginPane(
                 containerColor = AuthSecondaryButtonBackground,
                 contentColor = AuthTextSecondary
             )
-        } else if (selfHosted) {
+        } else if (useEmailLogin) {
             AuthEmailLoginForm(
                 uiState = uiState,
-                onSignIn = onSignIn
+                onSignIn = onSignIn,
+                initialFocusRequester = initialFocusRequester
             )
         } else {
             AuthQrCodeBlock(uiState = uiState, remainingMillis = remainingMillis)
@@ -366,10 +389,11 @@ private fun AuthQrLoginPane(
             horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isSignedIn || !selfHosted) {
+            if (isSignedIn || !useEmailLogin) {
                 Button(
                     onClick = onRefreshOrSignOut,
                     enabled = !uiState.isLoading,
+                    modifier = if (focusMainAction) Modifier.focusRequester(initialFocusRequester) else Modifier,
                     colors = ButtonDefaults.colors(
                         containerColor = AuthSecondaryButtonBackground,
                         focusedContainerColor = Color.White,
@@ -395,6 +419,11 @@ private fun AuthQrLoginPane(
             }
             Button(
                 onClick = onBackOrContinue,
+                modifier = if (!focusEmail && !focusMainAction) {
+                    Modifier.focusRequester(initialFocusRequester)
+                } else {
+                    Modifier
+                },
                 colors = ButtonDefaults.colors(
                     containerColor = AuthSecondaryButtonBackground,
                     focusedContainerColor = Color.White,
@@ -423,7 +452,8 @@ private fun AuthQrLoginPane(
 @Composable
 private fun AuthEmailLoginForm(
     uiState: AccountUiState,
-    onSignIn: (String, String) -> Unit
+    onSignIn: (String, String) -> Unit,
+    initialFocusRequester: FocusRequester
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -443,7 +473,8 @@ private fun AuthEmailLoginForm(
             onValueChange = { email = it },
             placeholder = stringResource(R.string.auth_email_placeholder),
             keyboardType = KeyboardType.Email,
-            imeAction = ImeAction.Next
+            imeAction = ImeAction.Next,
+            modifier = Modifier.focusRequester(initialFocusRequester)
         )
         InputField(
             value = password,
@@ -460,7 +491,7 @@ private fun AuthEmailLoginForm(
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.colors(
                 containerColor = Color.White,
-                focusedContainerColor = Color(0xFFE9DFFF),
+                focusedContainerColor = Color.White,
                 contentColor = Color.Black,
                 focusedContentColor = Color.Black,
                 disabledContainerColor = Color.White.copy(alpha = 0.12f),

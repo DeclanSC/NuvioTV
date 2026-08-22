@@ -41,6 +41,19 @@ class MetaRepositoryImpl @Inject constructor(
          *  Prevents excessive re-fetching on every details screen visit for addons
          *  that don't set meaningful Cache-Control headers. */
         private const val MIN_META_TTL_MS = 5L * 60 * 1000
+        private const val MAX_META_CACHE_ENTRIES = 32
+        private const val MAX_PRIMARY_META_CACHE_ENTRIES = 16
+    }
+
+    /**
+     * Creates a thread-safe LRU map that evicts oldest entries when [maxSize] is exceeded.
+     */
+    private fun <K, V> createLruCacheMap(maxSize: Int): MutableMap<K, V> {
+        val lru = object : LinkedHashMap<K, V>(maxSize, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean =
+                size > maxSize
+        }
+        return java.util.Collections.synchronizedMap(lru)
     }
 
     /** Internal result type for the deferred meta lookup to distinguish
@@ -76,10 +89,10 @@ class MetaRepositoryImpl @Inject constructor(
 
     // In-memory cache: "addonBaseUrl|type:id" -> CachedMeta with TTL.
     // Respects Cache-Control max-age from addon responses.
-    private val metaCache = ConcurrentHashMap<String, CachedMeta>()
+    private val metaCache = createLruCacheMap<String, CachedMeta>(MAX_META_CACHE_ENTRIES)
     // Separate cache for full meta fetched from addons (bypasses catalog-level cache)
-    private val addonMetaCache = ConcurrentHashMap<String, CachedMeta>()
-    private val primaryAddonMetaCache = ConcurrentHashMap<String, CachedMeta>()
+    private val addonMetaCache = createLruCacheMap<String, CachedMeta>(MAX_META_CACHE_ENTRIES)
+    private val primaryAddonMetaCache = createLruCacheMap<String, CachedMeta>(MAX_PRIMARY_META_CACHE_ENTRIES)
 
     // In-flight deduplication: prevents concurrent coroutines from firing duplicate requests
     private val inFlightMeta = ConcurrentHashMap<String, Deferred<Meta?>>()
@@ -111,7 +124,9 @@ class MetaRepositoryImpl @Inject constructor(
                         val metaDto = response.body()?.meta ?: return@async null
                         val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
                         val ttlMs = parseMaxAgeMs(response.headers()["Cache-Control"])
-                        metaCache[cacheKey] = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                        val cached = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                        metaCache[cacheKey] = cached
+                        addonMetaCache["$type:$id"] = cached
                         meta
                     } else {
                         null
@@ -149,6 +164,22 @@ class MetaRepositoryImpl @Inject constructor(
             addonMetaCache.remove(cacheKey)
         }
 
+        inFlightAddonMeta[cacheKey]?.let { existingDeferred ->
+            when (val lookupResult = existingDeferred.await()) {
+                is MetaLookupResult.Found -> {
+                    emit(NetworkResult.Success(lookupResult.meta))
+                    return@flow
+                }
+                is MetaLookupResult.SourceSufficient -> {
+                    emit(NetworkResult.Error("Source addon sufficient", NetworkResult.SOURCE_SUFFICIENT_CODE))
+                    return@flow
+                }
+                is MetaLookupResult.NotFound -> {
+                    // Fall through — the in-flight request failed, try ourselves
+                }
+            }
+        }
+
         emit(NetworkResult.Loading)
 
         val addons = addonRepository.getInstalledAddons().first().enabledAddons()
@@ -181,12 +212,9 @@ class MetaRepositoryImpl @Inject constructor(
             }
         }
         metaResourceAddons.firstOrNull { it.supportsMetaId(id) }?.let { topMetaAddon ->
-            val fallbackType = when {
-                topMetaAddon.supportsMetaType(requestedType) -> requestedType
-                topMetaAddon.supportsMetaType(inferredType) -> inferredType
-                else -> inferredType.ifBlank { requestedType }
+            topMetaAddon.supportedCandidateType(requestedType, inferredType)?.let { fallbackType ->
+                prioritizedCandidates.add(topMetaAddon to fallbackType)
             }
-            prioritizedCandidates.add(topMetaAddon to fallbackType)
         }
         // Fallback: if no ID-matching addons found, include addons without idPrefixes
         if (prioritizedCandidates.isEmpty()) {
@@ -196,12 +224,9 @@ class MetaRepositoryImpl @Inject constructor(
                 }
             }
             metaResourceAddons.firstOrNull { it.idPrefixes.isEmpty() }?.let { topMetaAddon ->
-                val fallbackType = when {
-                    topMetaAddon.supportsMetaType(requestedType) -> requestedType
-                    topMetaAddon.supportsMetaType(inferredType) -> inferredType
-                    else -> inferredType.ifBlank { requestedType }
+                topMetaAddon.supportedCandidateType(requestedType, inferredType)?.let { fallbackType ->
+                    prioritizedCandidates.add(topMetaAddon to fallbackType)
                 }
-                prioritizedCandidates.add(topMetaAddon to fallbackType)
             }
         }
 
@@ -474,17 +499,33 @@ class MetaRepositoryImpl @Inject constructor(
 
     private fun inferCanonicalType(type: String, id: String): String {
         val normalizedType = type.trim()
-        val known = setOf("movie", "series", "tv", "channel", "anime")
+        // "tv" is Nuvio's internal synonym for episodic content. Stremio metadata
+        // addons advertise episodic content as "series", so fold it over here rather
+        // than requesting a type nothing declares. Live TV is a separate type
+        // ("channel") and is left alone.
+        if (normalizedType.equals("tv", ignoreCase = true)) return "series"
+        val known = setOf("movie", "series", "channel", "anime")
         if (normalizedType.lowercase() in known) return normalizedType
 
         val normalizedId = id.lowercase()
         return when {
             ":movie:" in normalizedId -> "movie"
             ":series:" in normalizedId -> "series"
-            ":tv:" in normalizedId -> "tv"
+            ":tv:" in normalizedId -> "series"
             ":anime:" in normalizedId -> "anime"
             else -> normalizedType
         }
+    }
+
+    /**
+     * Picks a meta type this addon actually advertises, preferring the requested one.
+     * Returns null when it supports neither, so a candidate is never built with a type
+     * the addon has already rejected.
+     */
+    private fun Addon.supportedCandidateType(requestedType: String, inferredType: String): String? = when {
+        supportsMetaType(requestedType) -> requestedType
+        supportsMetaType(inferredType) -> inferredType
+        else -> null
     }
 
     private fun selectPrimaryMetaCandidate(
@@ -507,11 +548,8 @@ class MetaRepositoryImpl @Inject constructor(
         val topMetaAddon = addons.firstOrNull { addon ->
             addon.resources.any { it.name == "meta" }
         } ?: return null
-        val fallbackType = when {
-            topMetaAddon.supportsMetaType(requestedType) -> requestedType
-            topMetaAddon.supportsMetaType(inferredType) -> inferredType
-            else -> inferredType.ifBlank { requestedType }
-        }
+        val fallbackType = topMetaAddon.supportedCandidateType(requestedType, inferredType)
+            ?: return null
         return topMetaAddon to fallbackType
     }
 
@@ -579,5 +617,10 @@ class MetaRepositoryImpl @Inject constructor(
         inFlightMeta.clear()
         inFlightAddonMeta.clear()
         inFlightPrimaryMeta.clear()
+    }
+
+    override fun getCachedMeta(type: String, id: String): Meta? {
+        val cacheKey = "$type:$id"
+        return addonMetaCache[cacheKey]?.takeIf { !it.isExpired() }?.meta
     }
 }

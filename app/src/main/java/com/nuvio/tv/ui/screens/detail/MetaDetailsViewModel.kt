@@ -5,10 +5,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.core.player.StreamAutoPlayPolicy
+import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.tmdb.TmdbMetadataService
 import com.nuvio.tv.core.tmdb.TmdbService
 import com.nuvio.tv.data.local.LayoutPreferenceDataStore
+import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.TraktAuthDataStore
 import com.nuvio.tv.data.local.TraktSettingsDataStore
@@ -45,6 +47,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,6 +83,7 @@ class MetaDetailsViewModel @Inject constructor(
     private val tmdbMetadataService: TmdbMetadataService,
     private val imdbEpisodeRatingsRepository: ImdbEpisodeRatingsRepository,
     private val mdbListRepository: MDBListRepository,
+    private val mdbListSettingsDataStore: MDBListSettingsDataStore,
     private val libraryRepository: LibraryRepository,
     private val watchProgressRepository: WatchProgressRepository,
     private val watchedItemsPreferences: WatchedItemsPreferences,
@@ -91,6 +95,8 @@ class MetaDetailsViewModel @Inject constructor(
     private val traktSettingsDataStore: TraktSettingsDataStore,
     private val layoutPreferenceDataStore: LayoutPreferenceDataStore,
     private val playerSettingsDataStore: PlayerSettingsDataStore,
+    private val profileManager: ProfileManager,
+    private val metaDetailsSessionState: MetaDetailsSessionState,
     private val watchedSeriesStateHolder: com.nuvio.tv.data.local.WatchedSeriesStateHolder,
     val posterOptions: com.nuvio.tv.ui.components.posteroptions.PosterOptionsController,
     savedStateHandle: SavedStateHandle
@@ -155,7 +161,10 @@ class MetaDetailsViewModel @Inject constructor(
         observeWatchProgress()
         observeWatchedEpisodes()
         observeMovieWatched()
+        observeRelatedWatchedStatus()
         observeBlurUnwatchedEpisodes()
+        observeOverallRatingsVisibility()
+        observeDetailImdbRatingsVisibility()
         observeShowFullReleaseDate()
         observeHideUnreleasedContent()
         loadMeta()
@@ -278,6 +287,15 @@ class MetaDetailsViewModel @Inject constructor(
     }
 
     private fun updateNextToWatch(nextToWatch: NextToWatch) {
+        _uiState.value.meta?.let { meta ->
+            metaDetailsSessionState.putNextToWatch(
+                profileId = profileManager.activeProfileId.value,
+                progressSource = traktSettingsDataStore.watchProgressSource.value.name,
+                contentId = _effectiveContentId.value,
+                contentType = meta.apiType,
+                nextToWatch = nextToWatch
+            )
+        }
         _uiState.update { state ->
             if (state.nextToWatch == nextToWatch) return@update state
             val nextSeason = nextToWatch.nextSeason
@@ -551,7 +569,6 @@ class MetaDetailsViewModel @Inject constructor(
         // Re-calculate next-to-watch when "furthest episode" preference changes
         viewModelScope.launch {
             layoutPreferenceDataStore.nextUpFromFurthestEpisode
-                .distinctUntilChanged()
                 .collectLatest {
                     calculateNextToWatch()
                 }
@@ -586,6 +603,56 @@ class MetaDetailsViewModel @Inject constructor(
                 _uiState.update { state ->
                     if (state.blurUnwatchedEpisodes == enabled) state else state.copy(blurUnwatchedEpisodes = enabled)
                 }
+                }
+        }
+    }
+
+    private fun observeDetailImdbRatingsVisibility() {
+        viewModelScope.launch {
+            layoutPreferenceDataStore.detailImdbRatingsVisibility
+                .distinctUntilChanged()
+                .collectLatest { visibility ->
+                    _uiState.update { state ->
+                        if (state.detailImdbRatingsVisibility == visibility) {
+                            state
+                        } else {
+                            state.copy(detailImdbRatingsVisibility = visibility)
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun observeOverallRatingsVisibility() {
+        viewModelScope.launch {
+            layoutPreferenceDataStore.homeImdbRatingsVisibility
+                .distinctUntilChanged()
+                .collectLatest { visibility ->
+                    _uiState.update { state ->
+                        if (state.overallRatingsVisibility == visibility) {
+                            state
+                        } else {
+                            state.copy(overallRatingsVisibility = visibility)
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun observeRelatedWatchedStatus() {
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                watchProgressRepository.observeWatchedMovieIds(),
+                watchedSeriesStateHolder.fullyWatchedSeriesIds
+            ) { movieIds, seriesIds ->
+                buildMap {
+                    movieIds.forEach { id -> put("${id}|movie", true) }
+                    seriesIds.forEach { id -> put("${id}|series", true) }
+                }
+            }.distinctUntilChanged().collect { status ->
+                _uiState.update { state ->
+                    if (state.relatedWatchedStatus == status) state else state.copy(relatedWatchedStatus = status)
+                }
             }
         }
     }
@@ -605,6 +672,8 @@ class MetaDetailsViewModel @Inject constructor(
     private fun loadMeta() {
         viewModelScope.launch {
             cancelCommentsRequests()
+            val mdbListSettings = mdbListSettingsDataStore.settings.first()
+            val isMdbListActive = mdbListSettings.enabled && mdbListSettings.apiKey.isNotBlank()
             _uiState.update {
                 it.copy(
                     isLoading = true,
@@ -613,7 +682,7 @@ class MetaDetailsViewModel @Inject constructor(
                     isEpisodeRatingsLoading = false,
                     episodeRatingsError = null,
                     mdbListRatings = null,
-                    showMdbListImdb = false,
+                    isMdbListRatingsActive = isMdbListActive,
                     tmdbRating = null,
                     moreLikeThis = emptyList(),
                     moreLikeThisSource = null,
@@ -694,7 +763,9 @@ class MetaDetailsViewModel @Inject constructor(
                 } else {
                     metaRepository.getMetaFromAllAddons(type = itemType, id = metaLookupId).collect { result ->
                         when (result) {
-                            is NetworkResult.Success -> applyMetaWithEnrichment(result.data)
+                            is NetworkResult.Success -> {
+                                applyMetaWithEnrichment(result.data)
+                            }
                             is NetworkResult.Error -> {
                                 if (!tryApplyTmdbFallbackMeta()) {
                                     val errorMsg = buildMetaLoadErrorMessage(result.message, metaLookupId)
@@ -787,11 +858,7 @@ class MetaDetailsViewModel @Inject constructor(
         return "$base\n\nID: $lookupId"
     }
 
-    private fun applyMeta(meta: Meta) {
-        // Update the effective content ID so watch-progress observers pick up
-        // the canonical ID (e.g. IMDB "tt0396375") instead of the navigation ID
-        // (which may be "tmdb:13836").  Don't downgrade from an IMDB ID to a
-        // less canonical one (e.g. tmdb:) — Trakt stores progress under IMDB.
+    private fun syncEffectiveContentId(meta: Meta) {
         if (meta.id.isNotBlank() && meta.id != itemId) {
             val currentIsImdb = _effectiveContentId.value.startsWith("tt")
             val newIsImdb = meta.id.startsWith("tt")
@@ -799,6 +866,17 @@ class MetaDetailsViewModel @Inject constructor(
                 _effectiveContentId.value = meta.id
             }
         }
+    }
+
+    private fun applyMeta(
+        meta: Meta,
+        initialNextToWatch: NextToWatch?
+    ) {
+        // Update the effective content ID so watch-progress observers pick up
+        // the canonical ID (e.g. IMDB "tt0396375") instead of the navigation ID
+        // (which may be "tmdb:13836").  Don't downgrade from an IMDB ID to a
+        // less canonical one (e.g. tmdb:) — Trakt stores progress under IMDB.
+        syncEffectiveContentId(meta)
 
         val seasons = meta.videos
             .mapNotNull { it.season }
@@ -822,7 +900,8 @@ class MetaDetailsViewModel @Inject constructor(
         _uiState.update {
             // If nextToWatch already set a season (from pre-computed remap), prefer it
             // over the default season selection.
-            val effectiveSeason = it.nextToWatch?.nextSeason
+            val effectiveNextToWatch = initialNextToWatch ?: it.nextToWatch
+            val effectiveSeason = effectiveNextToWatch?.nextSeason
                 ?.takeIf { s -> s in seasons }
                 ?: selectedSeason
             val effectiveEpisodes = if (effectiveSeason != selectedSeason) {
@@ -836,6 +915,7 @@ class MetaDetailsViewModel @Inject constructor(
                 seasons = seasons,
                 selectedSeason = effectiveSeason,
                 episodesForSeason = effectiveEpisodes,
+                nextToWatch = effectiveNextToWatch,
                 error = null,
                 commentsEpisodeTarget = null,
                 shouldShowCommentsSection = traktCommentsEnabled && traktAuthenticated && supportsComments(meta)
@@ -844,7 +924,6 @@ class MetaDetailsViewModel @Inject constructor(
 
         // Calculate next to watch after meta is loaded
         reevaluateSeriesWatchedBadge()
-        calculateNextToWatch()
 
         // Start fetching trailer after meta is loaded
         fetchTrailerUrl()
@@ -859,21 +938,60 @@ class MetaDetailsViewModel @Inject constructor(
         loadMoreLikeThisAsync(meta)
         val enriched = enrichMeta(meta)
 
-        // Pre-compute nextToWatch before applyMeta so the PlayButton text is stable
-        // from the first composition — prevents focus invalidation from late recomposition.
-        val progressMap = watchProgressRepository
-            .getAllEpisodeProgress(_effectiveContentId.value)
-            .first()
-        val watchedEpisodes = watchedItemsPreferences
-            .getWatchedEpisodesForContent(_effectiveContentId.value)
-            .first()
+        syncEffectiveContentId(enriched)
+        val cachedNextToWatch = metaDetailsSessionState.getNextToWatch(
+            profileId = profileManager.activeProfileId.value,
+            progressSource = traktSettingsDataStore.watchProgressSource.value.name,
+            contentId = _effectiveContentId.value,
+            contentType = enriched.apiType
+        )?.resolveForMeta(enriched)
+
+        applyMeta(
+            meta = enriched,
+            initialNextToWatch = cachedNextToWatch
+        )
+
+        val contentId = _effectiveContentId.value
+
+        // Wait for remote progress provider (Simkl/Trakt) to finish initial load.
+        watchProgressRepository.observeRemoteProgressLoaded().first { it }
+
+        // After remote is loaded, getAllEpisodeProgress may start with an onStart{emptyMap()}
+        // then emit real data. Take the first non-empty emission, or fallback to empty after timeout.
+        val progressDeferred = viewModelScope.async {
+            val flow = watchProgressRepository.getAllEpisodeProgress(contentId)
+            // Try to get a non-empty result within 150ms; fall back to whatever is available.
+            withTimeoutOrNull(150L) {
+                flow.first { it.isNotEmpty() }
+            } ?: flow.first()
+        }
+        val watchedDeferred = viewModelScope.async {
+            watchedItemsPreferences.getWatchedEpisodesForContent(contentId).first()
+        }
+        val progressMap = progressDeferred.await()
+        val watchedEpisodes = watchedDeferred.await()
         val precomputedNextToWatch = computeNextToWatch(enriched, progressMap, watchedEpisodes)
         updateNextToWatch(precomputedNextToWatch)
 
-        applyMeta(enriched)
         // Episode ratings and MDBList are independent — launch both without waiting.
         loadEpisodeRatingsAsync(enriched)
         viewModelScope.launch { loadMDBListRatings(enriched) }
+    }
+
+    private fun NextToWatch.resolveForMeta(meta: Meta): NextToWatch? {
+        val isSeries = meta.apiType.equals("series", ignoreCase = true) ||
+            meta.apiType.equals("tv", ignoreCase = true)
+        if (!isSeries) return copy(nextVideoId = meta.id)
+
+        val matchingEpisode = if (nextSeason != null && nextEpisode != null) {
+            meta.videos.firstOrNull { video ->
+                video.season == nextSeason && video.episode == nextEpisode
+            }
+        } else {
+            nextVideoId?.let { id -> meta.videos.firstOrNull { it.id == id } }
+        } ?: return null
+
+        return copy(nextVideoId = matchingEpisode.id)
     }
 
     private fun loadComments(meta: Meta, forceRefresh: Boolean = false) {
@@ -1196,6 +1314,8 @@ class MetaDetailsViewModel @Inject constructor(
     }
 
     private suspend fun loadMDBListRatings(meta: Meta) {
+        val settings = mdbListSettingsDataStore.settings.first()
+        val isMdbListActive = settings.enabled && settings.apiKey.isNotBlank()
         val ratingsResult = runCatching {
             mdbListRepository.getRatingsForMeta(
                 meta = meta,
@@ -1207,7 +1327,7 @@ class MetaDetailsViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 mdbListRatings = ratingsResult?.ratings,
-                showMdbListImdb = ratingsResult?.hasImdbRating == true
+                isMdbListRatingsActive = isMdbListActive
             )
         }
     }
@@ -1615,6 +1735,14 @@ class MetaDetailsViewModel @Inject constructor(
         val meta = _uiState.value.meta ?: return
         val progressMap = _uiState.value.episodeProgressMap
         val watchedEpisodes = _uiState.value.watchedEpisodes
+
+        // Don't override an existing nextToWatch with a computation from empty progress data.
+        // The inline computation in applyMetaWithEnrichment reads directly from the repo
+        // and may have better data than the UI state observer at this point.
+        if (progressMap.isEmpty() && watchedEpisodes.isEmpty() && _uiState.value.nextToWatch != null) {
+            return
+        }
+
         nextToWatchJob?.cancel()
 
         nextToWatchJob = viewModelScope.launch {
