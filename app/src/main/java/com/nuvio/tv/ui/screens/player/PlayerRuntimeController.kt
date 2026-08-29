@@ -472,6 +472,7 @@ class PlayerRuntimeController(
     internal var forceDv7ToHevc: Boolean = false
     internal var startupRetryCount: Int = 0
     internal var parsingErrorProbeAttempted: Boolean = false
+    internal var hasTriedMpvFallbackForVc1: Boolean = false
     internal var hasRetriedCurrentStreamAfterUnexpectedNpe: Boolean = false
     internal var hasRetriedCurrentStreamAfterMediaPeriodHolderCrash: Boolean = false
     internal var timeoutRecoveryAttempts: Int = 0

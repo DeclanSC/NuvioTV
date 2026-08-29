@@ -1976,6 +1976,7 @@ internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     isAudioDisabledForCurrentPlayback = false
     dv7ToDv81BridgeVersionForCurrentPlayback = null
     dv7ToDv81LastProbeReasonForCurrentPlayback = null
+    hasTriedMpvFallbackForVc1 = false
     playerInitializationStartedAtMs = 0L
     pendingSeekTelemetryRequestedAtMs = 0L
     pendingSeekTelemetryTargetMs = -1L
