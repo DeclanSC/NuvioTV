@@ -192,27 +192,27 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     val playingNow = view.isPlayingNow()
                     val cacheBuffering = view.isPausedForCacheNow() || view.isCoreIdleNow()
                     var firstFrameReady = hasRenderedFirstFrame
-                        if (!firstFrameReady) {
-                            firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && playerDuration > 0L)
-                            if (firstFrameReady) {
-                                hasRenderedFirstFrame = true
-                                val clickToFirstFrameMs = launchStartedAtElapsedMs
-                                    ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
-                                    ?: -1L
-                                val initToFirstFrameMs = (System.currentTimeMillis() - playerInitializationStartedAtMs)
-                                    .coerceAtLeast(0L)
-                                playbackAnalyticsDiagnostics.recordRawEventLine(
-                                    "PLAYBACK_STARTUP: clickToFirstFrameMs=$clickToFirstFrameMs " +
+                    if (!firstFrameReady) {
+                        firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && playerDuration > 0L)
+                        if (firstFrameReady) {
+                            hasRenderedFirstFrame = true
+                            val clickToFirstFrameMs = launchStartedAtElapsedMs
+                                ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
+                                ?: -1L
+                            val initToFirstFrameMs = (System.currentTimeMillis() - playerInitializationStartedAtMs)
+                                .coerceAtLeast(0L)
+                            playbackAnalyticsDiagnostics.recordRawEventLine(
+                                "PLAYBACK_STARTUP: clickToFirstFrameMs=$clickToFirstFrameMs " +
                                         "initToFirstFrameMs=$initToFirstFrameMs playbackSpeed=${_uiState.value.playbackSpeed} " +
                                         "currentPositionMs=$pos durationMs=$playerDuration engine=MPV " +
                                         "host=${currentStreamUrl.safePlaybackEventsHost()}"
-                                )
-                                finishLoadingDiagnostics("mpv_first_frame_ready")
-                                if (_uiState.value.postPlayDismissedForCurrentEpisode) {
-                                    _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
-                                }
+                            )
+                            finishLoadingDiagnostics("mpv_first_frame_ready")
+                            if (_uiState.value.postPlayDismissedForCurrentEpisode) {
+                                _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
                             }
                         }
+                    }
                     if (playerDuration > lastKnownDuration) {
                         lastKnownDuration = playerDuration
                     }
@@ -331,7 +331,7 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         val usedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
                         val maxMb = runtime.maxMemory() / (1024 * 1024)
                         Log.d(PlayerRuntimeController.TAG, "BUFFER: ahead=${bufAhead}s, loading=$loading, heap=$usedMb/${maxMb}MB, pos=${pos / 1000}s")
-                        
+
                         if (NuvioExoPlayerPerformanceHelper.shouldLogMemoryFootprint()) {
                             val defaultAllocator = _loadControl?.allocator as? androidx.media3.exoplayer.upstream.DefaultAllocator
                             val totalFootprintBytes = defaultAllocator?.let { allocator ->
@@ -361,6 +361,7 @@ internal fun PlayerRuntimeController.stopProgressUpdates() {
 }
 
 internal fun PlayerRuntimeController.startWatchProgressSaving() {
+    if (isRandom) return
     watchProgressSaveJob?.cancel()
     watchProgressSaveJob = scope.launch {
         while (isActive) {
@@ -371,6 +372,7 @@ internal fun PlayerRuntimeController.startWatchProgressSaving() {
 }
 
 internal fun PlayerRuntimeController.stopWatchProgressSaving() {
+    if (isRandom) return
     watchProgressSaveJob?.cancel()
     watchProgressSaveJob = null
 }
@@ -589,6 +591,7 @@ private fun String.reportSafeHost(): String {
 }
 
 internal fun PlayerRuntimeController.saveWatchProgressIfNeeded() {
+    if (isRandom) return
     if (!hasRenderedFirstFrame) return
     val currentPosition = currentPlaybackPositionMs() ?: return
     val duration = getEffectiveDuration(currentPosition)
@@ -604,6 +607,7 @@ internal fun PlayerRuntimeController.saveWatchProgressIfNeeded() {
 }
 
 internal fun PlayerRuntimeController.saveWatchProgress() {
+    if (isRandom) return
     if (!hasRenderedFirstFrame) return
     val currentPosition = currentPlaybackPositionMs() ?: return
     val duration = getEffectiveDuration(currentPosition)
@@ -650,7 +654,7 @@ internal fun PlayerRuntimeController.handleNaturalPlaybackEnded() {
         Log.i(
             PlayerRuntimeController.TAG,
             "Ignoring non-natural ENDED: firstFrame=$hasRenderedFirstFrame " +
-                "error=$hasFatalError durationMs=$duration positionMs=$position"
+                    "error=$hasFatalError durationMs=$duration positionMs=$position"
         )
         // Prevent PlayerScreen from dispatching onPlaybackEnded / next-episode navigation.
         _uiState.update { it.copy(playbackEnded = false) }
@@ -681,6 +685,7 @@ internal fun PlayerRuntimeController.cancelNextEpisodeAutoPlayOnFatalError() {
 }
 
 internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, duration: Long, syncRemote: Boolean = true) {
+    if (isRandom) return
     if (contentType.equals("cloud", ignoreCase = true)) {
         saveCloudLibraryProgress(position, duration, completed = false)
         return
@@ -763,6 +768,7 @@ internal fun PlayerRuntimeController.currentPlaybackProgressPercent(): Float {
 }
 
 internal fun PlayerRuntimeController.refreshScrobbleItem() {
+    if (isRandom) return
     currentScrobbleItem = buildScrobbleItem()
     hasSentScrobbleStartForCurrentItem = false
     hasRequestedScrobbleStartForCurrentItem = false
@@ -785,13 +791,14 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TrackingMediaReference
     )
     return reference.takeIf { media ->
         media.hasResolvableIdentity &&
-            (media.kind == TrackingMediaKind.MOVIE ||
+                (media.kind == TrackingMediaKind.MOVIE ||
                 media.kind == TrackingMediaKind.ANIME ||
                 media.episode != null)
     }
 }
 
 internal fun PlayerRuntimeController.emitScrobbleStart() {
+    if (isRandom) return
     logScrobbleDiagnostic("start_evaluated")
     if (isShortPlaceholderStream()) {
         logScrobbleDiagnostic("start_skipped", "reason=short_placeholder")
@@ -849,6 +856,7 @@ internal fun PlayerRuntimeController.emitScrobbleStart() {
 }
 
 internal fun PlayerRuntimeController.emitScrobbleStop(progressPercent: Float? = null) {
+    if (isRandom) return
     logScrobbleDiagnostic("stop_evaluated", "providedProgress=${progressPercent ?: "none"}")
     if (isShortPlaceholderStream()) {
         logScrobbleDiagnostic("stop_skipped", "reason=short_placeholder")
@@ -883,6 +891,7 @@ internal fun PlayerRuntimeController.emitScrobbleStop(progressPercent: Float? = 
 }
 
 internal fun PlayerRuntimeController.emitScrobblePause(progressPercent: Float? = null) {
+    if (isRandom) return
     logScrobbleDiagnostic("pause_evaluated", "providedProgress=${progressPercent ?: "none"}")
     if (isShortPlaceholderStream()) {
         logScrobbleDiagnostic("pause_skipped", "reason=short_placeholder")
@@ -918,12 +927,14 @@ internal fun PlayerRuntimeController.emitScrobblePause(progressPercent: Float? =
 }
 
 internal fun PlayerRuntimeController.emitCompletionScrobbleStop(progressPercent: Float) {
+    if (isRandom) return
     if (progressPercent < 80f || hasSentCompletionScrobbleForCurrentItem) return
     hasSentCompletionScrobbleForCurrentItem = true
     emitScrobbleStop(progressPercent = progressPercent)
 }
 
 internal fun PlayerRuntimeController.emitStopScrobbleForCurrentProgress() {
+    if (isRandom) return
     val progressPercent = currentPlaybackProgressPercent()
     if (!shouldSendStopScrobble(hasRequestedScrobbleStartForCurrentItem, progressPercent)) {
         logScrobbleDiagnostic(
@@ -940,10 +951,12 @@ internal fun PlayerRuntimeController.emitStopScrobbleForCurrentProgress() {
 }
 
 internal fun PlayerRuntimeController.emitPauseScrobbleForCurrentProgress() {
+    if (isRandom) return
     emitScrobblePause(progressPercent = currentPlaybackProgressPercent())
 }
 
 internal fun PlayerRuntimeController.emitSeekScrobbleRestart(progressPercent: Float) {
+    if (isRandom) return
     if (progressPercent < 1f || progressPercent >= 80f) return
     if (isShortPlaceholderStream()) return
     val item = currentScrobbleItem ?: return
@@ -976,8 +989,8 @@ internal fun PlayerRuntimeController.logScrobbleDiagnostic(
     Log.d(
         TRACKING_SCROBBLE_DIAGNOSTIC_TAG,
         "player stage=$stage engine=$currentInternalPlayerEngine uiPlaying=${_uiState.value.isPlaying} " +
-            "requested=$hasRequestedScrobbleStartForCurrentItem sent=$hasSentScrobbleStartForCurrentItem " +
-            "generation=$scrobbleStartRequestGeneration $item $detail".trim()
+                "requested=$hasRequestedScrobbleStartForCurrentItem sent=$hasSentScrobbleStartForCurrentItem " +
+                "generation=$scrobbleStartRequestGeneration $item $detail".trim()
     )
 }
 
@@ -1106,9 +1119,9 @@ internal fun PlayerRuntimeController.schedulePauseOverlay() {
         delay(pauseOverlayDelayMs)
         val s = _uiState.value
         val anyPanelOpen = s.showSubtitleOverlay || s.showSubtitleStylePanel ||
-            s.showSpeedDialog || s.showMoreDialog || s.showEpisodesPanel ||
-            s.showSourcesPanel || s.showAudioOverlay || s.showStreamInfoOverlay ||
-            s.showSubtitleTimingDialog || s.showSubtitleDelayOverlay
+                s.showSpeedDialog || s.showMoreDialog || s.showEpisodesPanel ||
+                s.showSourcesPanel || s.showAudioOverlay || s.showStreamInfoOverlay ||
+                s.showSubtitleTimingDialog || s.showSubtitleDelayOverlay
         if (!s.isPlaying && s.pauseOverlayEnabled && s.error == null && !anyPanelOpen) {
             _uiState.update { it.copy(showPauseOverlay = true, showControls = false) }
         }

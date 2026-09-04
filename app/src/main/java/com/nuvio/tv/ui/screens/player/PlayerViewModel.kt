@@ -94,6 +94,7 @@ class PlayerViewModel @Inject constructor(
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     private val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
     profileManager: com.nuvio.tv.core.profile.ProfileManager,
+    private val randomEpisodeSessionTracker: com.nuvio.tv.core.player.RandomEpisodeSessionTracker,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -139,6 +140,7 @@ class PlayerViewModel @Inject constructor(
         tvRecommendationManager = tvRecommendationManager,
         profileId = savedStateHandle.get<String>("profileId")?.toIntOrNull()
             ?: profileManager.activeProfileId.value,
+        randomEpisodeSessionTracker = randomEpisodeSessionTracker,
         savedStateHandle = savedStateHandle,
         scope = viewModelScope
     )
@@ -163,6 +165,26 @@ class PlayerViewModel @Inject constructor(
         trailerPlayerPool = trailerPlayerPool,
         scope = viewModelScope
     )
+
+    data class CurrentEpisodeInfo(
+        val videoId: String,
+        val season: Int?,
+        val episode: Int?,
+        val episodeTitle: String?
+    )
+
+    fun getCurrentEpisodeInfo(): CurrentEpisodeInfo {
+        return CurrentEpisodeInfo(
+            videoId = controller.currentVideoId ?: "",
+            season = controller.currentSeason,
+            episode = controller.currentEpisode,
+            episodeTitle = controller.currentEpisodeTitle
+        )
+    }
+
+    fun setIsRandom(random: Boolean) {
+        controller.setIsRandom(random)
+    }
 
     val uiState: StateFlow<PlayerUiState>
         get() = controller.uiState

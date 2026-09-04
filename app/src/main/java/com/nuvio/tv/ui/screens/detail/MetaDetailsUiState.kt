@@ -48,6 +48,7 @@ data class MetaDetailsUiState(
     val sharedTrailerErrorMessage: String? = null,
     val selectedSharedTrailer: MetaTrailer? = null,
     val trailerButtonEnabled: Boolean = false,
+    val randomButtonEnabled: Boolean = false,
     val librarySourceMode: LibrarySourceMode = LibrarySourceMode.LOCAL,
     val libraryListTabs: List<LibraryListTab> = emptyList(),
     val isInWatchlist: Boolean = false,

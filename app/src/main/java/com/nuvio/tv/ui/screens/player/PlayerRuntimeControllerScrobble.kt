@@ -55,12 +55,12 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
                 logSwitchTrace(
                     stage = "track-pref-load",
                     message = "contentId=$id loadedAudio=${loaded?.audio?.language}/${loaded?.audio?.name} " +
-                        "loadedSubtitle=${loaded?.subtitle?.javaClass?.simpleName ?: "none"}"
+                            "loadedSubtitle=${loaded?.subtitle?.javaClass?.simpleName ?: "none"}"
                 )
                 Log.d(
                     PlayerRuntimeController.TAG,
                     "TRACK_PREF load: contentId=$id S${currentSeason}E${currentEpisode} " +
-                        "result=${if (loaded == null) "null (no saved preference)" else "audio=${loaded.audio?.language}/${loaded.audio?.name} subtitle=${loaded.subtitle?.javaClass?.simpleName}"}"
+                            "result=${if (loaded == null) "null (no saved preference)" else "audio=${loaded.audio?.language}/${loaded.audio?.name} subtitle=${loaded.subtitle?.javaClass?.simpleName}"}"
                 )
                 persistedTrackPreference = loaded
             } ?: Log.d(PlayerRuntimeController.TAG, "TRACK_PREF load: skipped (contentId is null)")
@@ -83,14 +83,14 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
             Log.d(
                 PlayerRuntimeController.TAG,
                 "TRACK_PREF load: skipped (persistedTrackPreference already set: " +
-                    "audio=${persistedTrackPreference?.audio?.language}/${persistedTrackPreference?.audio?.name} " +
-                    "subtitle=${persistedTrackPreference?.subtitle?.javaClass?.simpleName})"
+                        "audio=${persistedTrackPreference?.audio?.language}/${persistedTrackPreference?.audio?.name} " +
+                        "subtitle=${persistedTrackPreference?.subtitle?.javaClass?.simpleName})"
             )
             logSwitchTrace(
                 stage = "track-pref-load",
                 message = "skipped=true reason=persisted-already-set " +
-                    "audio=${persistedTrackPreference?.audio?.language}/${persistedTrackPreference?.audio?.name} " +
-                    "subtitle=${persistedTrackPreference?.subtitle?.javaClass?.simpleName ?: "none"}"
+                        "audio=${persistedTrackPreference?.audio?.language}/${persistedTrackPreference?.audio?.name} " +
+                        "subtitle=${persistedTrackPreference?.subtitle?.javaClass?.simpleName ?: "none"}"
             )
         }
         contentId?.takeIf { it.isNotBlank() }?.let { id ->
@@ -103,7 +103,7 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
         // callback fired before the DB read completed, causing the resume
         // seek to be silently skipped — the player would start from 0:00
         // or hang in buffering after a late seek.
-        if (loadSavedProgress) {
+        if (loadSavedProgress && !isRandom) {
             recordLoadingDiagnosticEvent(
                 phase = "loading_saved_progress",
                 message = context.getString(com.nuvio.tv.R.string.player_loading_preparing)
@@ -125,6 +125,11 @@ private fun String.safeScrobbleHost(): String {
 }
 
 internal suspend fun PlayerRuntimeController.warmTraktEpisodeMappingForCurrentPlayback() {
+    if (isRandom) {
+        currentTraktEpisodeMapping = null
+        currentTraktEpisodeMappingKey = null
+        return
+    }
     if (!traktEpisodeMappingService.isTraktAuthenticated()) {
         currentTraktEpisodeMapping = null
         currentTraktEpisodeMappingKey = null

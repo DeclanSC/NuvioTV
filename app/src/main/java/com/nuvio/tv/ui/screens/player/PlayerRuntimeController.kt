@@ -99,6 +99,7 @@ class PlayerRuntimeController(
     internal val playbackIssueReportRepository: PlaybackIssueReportRepository,
     internal val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
     internal val profileId: Int,
+    internal val randomEpisodeSessionTracker: com.nuvio.tv.core.player.RandomEpisodeSessionTracker,
     savedStateHandle: SavedStateHandle,
     internal val scope: CoroutineScope
 ) {
@@ -223,6 +224,16 @@ class PlayerRuntimeController(
 
     fun getCurrentStreamUrl(): String = currentStreamUrl
     fun getCurrentHeaders(): Map<String, String> = currentHeaders
+
+    fun setIsRandom(random: Boolean) {
+        if (isRandom != random) {
+            isRandom = random
+            if (!random) {
+                randomEpisodeSessionHistory.clear()
+            }
+            recomputeNextEpisode(resetVisibility = true)
+        }
+    }
 
     fun stopAndRelease() {
         releasePlayer()
@@ -479,6 +490,8 @@ class PlayerRuntimeController(
     internal var audioOutputRouteCallback: AudioDeviceCallback? = null
     internal var audioRouteChangeJob: Job? = null
 
+    internal var isRandom: Boolean = false
+    internal val randomEpisodeSessionHistory: MutableSet<Pair<Int, Int>> = mutableSetOf()
     internal var lastBufferLogTimeMs: Long = 0L
     internal var pendingSeekFlush: Boolean = false
     internal var suppressBufferingUiForSeek: Boolean = false
@@ -490,7 +503,7 @@ class PlayerRuntimeController(
     internal var lastVodTelemetryRefreshTimeMs: Long = 0L
     internal var cachedVodCacheLogState: String = "vod=warming"
     internal var bufferLogsEnabled: Boolean = false
-    internal var lastProgressUiUpdateUptimeMs: Long = 0L
+internal var lastProgressUiUpdateUptimeMs: Long = 0L
     internal var lastSkipIntervalEvaluationUptimeMs: Long = 0L
     internal var lastNextEpisodeEvaluationUptimeMs: Long = 0L
     internal var bufferLogJob: Job? = null
@@ -627,6 +640,10 @@ class PlayerRuntimeController(
         // was a fire-and-forget coroutine that raced against initializePlayer(),
         // causing the resume seek to be silently lost when ExoPlayer's STATE_READY
         // fired before the DB read completed.
+        if (!isRandom && !navigationArgs.startFromBeginning) {
+            loadSavedProgressFor(currentSeason, currentEpisode)
+        }
+        fetchParentalGuide(contentId, contentType, currentSeason, currentEpisode)
         observeSubtitleSettings()
         if (contentType.equals("cloud", ignoreCase = true)) {
             initializeCloudPlaybackSequence()

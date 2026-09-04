@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -56,6 +57,14 @@ fun NuvioNavHost(
     startDestination: String = Screen.Home.route,
     hideBuiltInHeaders: Boolean = false
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val randomEpisodeSessionTracker = remember {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context,
+            com.nuvio.tv.core.player.RandomEpisodeSessionEntryPoint::class.java
+        ).randomEpisodeSessionTracker()
+    }
+
     fun isStreamToPlayer(from: String, to: String): Boolean {
         return from.startsWith("stream/") && to.startsWith("player/")
     }
@@ -392,6 +401,53 @@ fun NuvioNavHost(
                             contentLanguage = contentLanguage
                         )
                     )
+                },
+                onRandomPlayClick = { videoId, contentType, contentId, title, poster, backdrop, logo, season, episode, episodeName, genres, year, runtime, _ ->
+                    randomEpisodeSessionTracker.clear()
+                    navController.navigate(
+                        Screen.Stream.createRoute(
+                            videoId = videoId,
+                            contentType = contentType,
+                            title = title,
+                            poster = poster,
+                            backdrop = backdrop,
+                            logo = logo,
+                            season = season,
+                            episode = episode,
+                            episodeName = episodeName,
+                            genres = genres,
+                            year = year,
+                            contentId = contentId,
+                            contentName = title,
+                            runtime = runtime,
+                            returnToDetailOnBack = contentType.equals("series", ignoreCase = true),
+                            isRandom = true
+                        )
+                    )
+                },
+                onRandomManualPlayClick = { videoId, contentType, contentId, title, poster, backdrop, logo, season, episode, episodeName, genres, year, runtime, _ ->
+                    randomEpisodeSessionTracker.clear()
+                    navController.navigate(
+                        Screen.Stream.createRoute(
+                            videoId = videoId,
+                            contentType = contentType,
+                            title = title,
+                            poster = poster,
+                            backdrop = backdrop,
+                            logo = logo,
+                            season = season,
+                            episode = episode,
+                            episodeName = episodeName,
+                            genres = genres,
+                            year = year,
+                            contentId = contentId,
+                            contentName = title,
+                            runtime = runtime,
+                            manualSelection = true,
+                            returnToDetailOnBack = contentType.equals("series", ignoreCase = true),
+                            isRandom = true
+                        )
+                    )
                 }
             )
         }
@@ -486,6 +542,11 @@ fun NuvioNavHost(
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null
+                },
+                navArgument("isRandom") {
+                    type = NavType.BoolType
+                    nullable = false
+                    defaultValue = false
                 }
             )
         ) { backStackEntry ->
@@ -503,12 +564,14 @@ fun NuvioNavHost(
             val startFromBeginning = streamArgs
                 ?.getString("startFromBeginning")
                 ?.toBooleanStrictOrNull() == true
+            val isRandom = streamArgs?.getBoolean("isRandom") ?: false
             StreamScreen(
                 startFromBeginning = startFromBeginning,
                 restoreSourceSelection = restoreSourceSelection,
                 onSourceSelectionRestoreHandled = {
                     streamSavedState[SOURCE_SELECTION_RESTORE_STATE_KEY] = false
                 },
+                isRandom = isRandom,
                 onBackPress = {
                     val streamContentType = streamArgs?.getString("contentType").orEmpty()
                     val streamContentId = streamArgs?.getString("contentId").orEmpty()
@@ -517,8 +580,13 @@ fun NuvioNavHost(
                     if (streamContentType.equals("series", ignoreCase = true) && streamContentId.isNotBlank()) {
                         val detailEntry = runCatching { navController.getBackStackEntry(Screen.Detail.route) }.getOrNull()
                         if (detailEntry != null) {
-                            detailEntry.savedStateHandle["returnFocusSeason"] = season
-                            detailEntry.savedStateHandle["returnFocusEpisode"] = episode
+                            if (!isRandom) {
+                                detailEntry.savedStateHandle["returnFocusSeason"] = season
+                                detailEntry.savedStateHandle["returnFocusEpisode"] = episode
+                            } else {
+                                detailEntry.savedStateHandle.remove<Int>("returnFocusSeason")
+                                detailEntry.savedStateHandle.remove<Int>("returnFocusEpisode")
+                            }
                             navController.popBackStack(Screen.Detail.route, inclusive = false)
                         } else {
                             navController.navigate(
@@ -576,7 +644,8 @@ fun NuvioNavHost(
                                 fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
-                                profileId = playbackInfo.profileId
+                                profileId = playbackInfo.profileId,
+                                isRandom = isRandom
                             )
                         )
                     }
@@ -617,7 +686,8 @@ fun NuvioNavHost(
                                 fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
-                                profileId = playbackInfo.profileId
+                                profileId = playbackInfo.profileId,
+                                isRandom = isRandom
                             )
                         ) {
                             popUpTo(Screen.Stream.route) { inclusive = true }
@@ -762,6 +832,11 @@ fun NuvioNavHost(
                     nullable = true
                     defaultValue = null
                 },
+                navArgument("isRandom") {
+                    type = NavType.BoolType
+                    nullable = false
+                    defaultValue = false
+                },
                 navArgument("launchStartedAtMs") {
                     type = NavType.StringType
                     nullable = true
@@ -817,13 +892,16 @@ fun NuvioNavHost(
                 }
             }
 
+            val args = backStackEntry.arguments
+            val isRandom = args?.getBoolean("isRandom") ?: false
             PlayerScreen(
+                isRandom = isRandom,
                 onBackPress = { currentVideoId, currentSeason, currentEpisode, autoPlayEnabled, playbackCompleted ->
                     val args = backStackEntry.arguments
                     val initialSeason = args?.getString("season")?.toIntOrNull()
                     val initialEpisode = args?.getString("episode")?.toIntOrNull()
                     val episodeChangedInPlace = (currentSeason != null || currentEpisode != null) &&
-                        (currentSeason != initialSeason || currentEpisode != initialEpisode)
+                            (currentSeason != initialSeason || currentEpisode != initialEpisode)
                     val returnToDetailOnBack = args?.getString("returnToDetailOnBack")
                         ?.toBooleanStrictOrNull() == true
                     val returnToHomeOnBack = args?.getString("returnToHomeOnBack")
@@ -892,7 +970,8 @@ fun NuvioNavHost(
                                         manualSelection = true,
                                         returnToDetailOnBack = returnToDetailOnBack,
                                         returnToHomeOnBack = returnToHomeOnBack,
-                                        profileId = args?.getString("profileId")?.toIntOrNull()
+                                        profileId = args?.getString("profileId")?.toIntOrNull(),
+                                        isRandom = isRandom
                                     )
                                 ) {
                                     popUpTo(Screen.Stream.route) { inclusive = true }
@@ -903,14 +982,21 @@ fun NuvioNavHost(
                             }
                         }
                         else -> {
-                            // normal back — skip Stream screen if episode/movie was completed
-                            val skipStreamScreen = playbackCompleted && contentId.isNotBlank()
+                            // normal back — skip Stream if playback completed
+                            val skipStreamScreen =
+                                playbackCompleted && contentId.isNotBlank()
+
                             if (skipStreamScreen) {
                                 returnToDetail()
                             } else {
-                                val returnedToStream = popBackToStream()
+                                val returnedToStream =
+                                    popBackToStream()
                                 if (!returnedToStream) {
-                                    if (returnToDetailOnBack && contentType.equals("series", ignoreCase = true) && contentId.isNotBlank()) {
+                                    if (
+                                        returnToDetailOnBack &&
+                                        contentType.equals("series", ignoreCase = true) &&
+                                        contentId.isNotBlank()
+                                    ) {
                                         returnToDetail()
                                     } else {
                                         navController.popBackStack()
@@ -946,7 +1032,8 @@ fun NuvioNavHost(
                             runtime = null,
                             returnToDetailOnBack = returnToDetailOnBack,
                             returnToHomeOnBack = returnToHomeOnBack,
-                            profileId = args?.getString("profileId")?.toIntOrNull()
+                            profileId = args?.getString("profileId")?.toIntOrNull(),
+                            isRandom = isRandom
                         )
                         navController.navigate(route) {
                             popUpTo(Screen.Player.route) { inclusive = true }
@@ -987,25 +1074,28 @@ fun NuvioNavHost(
                                 }
                             }
                         } else {
-                            val contentId = args?.getString("contentId").orEmpty()
-                            val contentType = args?.getString("contentType").orEmpty()
-                            val returnToHomeOnBack = args?.getString("returnToHomeOnBack")
-                                ?.toBooleanStrictOrNull() == true
-                            val focusSeason = args?.getString("season")?.toIntOrNull()
-                            val focusEpisode = args?.getString("episode")?.toIntOrNull()
+                            val focusSeason = if (isRandom) null else args?.getString("season")?.toIntOrNull()
+                            val focusEpisode = if (isRandom) null else args?.getString("episode")?.toIntOrNull()
                             if (contentId.isNotBlank()) {
                                 val detailEntry = navController.currentBackStack.value
                                     .lastOrNull {
                                         val itemId = it.arguments?.getString("itemId").orEmpty()
                                         val itemType = it.arguments?.getString("itemType").orEmpty()
                                         it.destination.route?.startsWith("detail/") == true &&
-                                            itemId == contentId &&
-                                            (itemType.isBlank() || contentType.isBlank() || itemType.equals(contentType, ignoreCase = true))
+                                                itemId == contentId &&
+                                                (itemType.isBlank() || contentType.isBlank() || itemType.equals(
+                                                    contentType,
+                                                    ignoreCase = true
+                                                ))
                                     }
                                 if (detailEntry != null) {
                                     detailEntry.savedStateHandle["returnFocusSeason"] = focusSeason
-                                    detailEntry.savedStateHandle["returnFocusEpisode"] = focusEpisode
-                                    navController.popBackStack(Screen.Detail.route, inclusive = false)
+                                    detailEntry.savedStateHandle["returnFocusEpisode"] =
+                                        focusEpisode
+                                    navController.popBackStack(
+                                        Screen.Detail.route,
+                                        inclusive = false
+                                    )
                                 } else {
                                     navController.navigate(
                                         Screen.Detail.createRoute(
@@ -1023,7 +1113,10 @@ fun NuvioNavHost(
                                     }
                                 }
                             } else {
-                                val poppedToStream = navController.popBackStack(Screen.Stream.route, inclusive = true)
+                                val poppedToStream = navController.popBackStack(
+                                    Screen.Stream.route,
+                                    inclusive = true
+                                )
                                 if (!poppedToStream) {
                                     navController.popBackStack()
                                 }
@@ -1045,6 +1138,7 @@ fun NuvioNavHost(
                     )
                 },
                 onPlaybackErrorBack = {
+                    val isRandom = args?.getBoolean("isRandom") ?: false
                     val returnedToStream = popBackToStream()
                     if (!returnedToStream) {
                         val args = backStackEntry.arguments
@@ -1075,7 +1169,8 @@ fun NuvioNavHost(
                                     ?.toBooleanStrictOrNull() == true,
                                 returnToHomeOnBack = args?.getString("returnToHomeOnBack")
                                     ?.toBooleanStrictOrNull() == true,
-                                profileId = args?.getString("profileId")?.toIntOrNull()
+                                profileId = args?.getString("profileId")?.toIntOrNull(),
+                                isRandom = isRandom
                             )
 
                             navController.navigate(route) {
