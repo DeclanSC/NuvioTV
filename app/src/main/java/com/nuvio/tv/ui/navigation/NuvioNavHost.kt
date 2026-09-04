@@ -645,7 +645,6 @@ fun NuvioNavHost(
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
                                 profileId = playbackInfo.profileId,
-                                contentLanguage = playbackInfo.contentLanguage,
                                 isRandom = isRandom
                             )
                         )
@@ -688,7 +687,6 @@ fun NuvioNavHost(
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
                                 profileId = playbackInfo.profileId,
-                                contentLanguage = playbackInfo.contentLanguage,
                                 isRandom = isRandom
                             )
                         ) {
@@ -973,7 +971,6 @@ fun NuvioNavHost(
                                         returnToDetailOnBack = returnToDetailOnBack,
                                         returnToHomeOnBack = returnToHomeOnBack,
                                         profileId = args?.getString("profileId")?.toIntOrNull(),
-                                        returnToHomeOnBack = returnToHomeOnBack,
                                         isRandom = isRandom
                                     )
                                 ) {
@@ -1036,7 +1033,6 @@ fun NuvioNavHost(
                             returnToDetailOnBack = returnToDetailOnBack,
                             returnToHomeOnBack = returnToHomeOnBack,
                             profileId = args?.getString("profileId")?.toIntOrNull(),
-                            returnToHomeOnBack = returnToHomeOnBack,
                             isRandom = isRandom
                         )
                         navController.navigate(route) {
@@ -1178,8 +1174,7 @@ fun NuvioNavHost(
                                     ?.toBooleanStrictOrNull() == true,
                                 returnToHomeOnBack = args?.getString("returnToHomeOnBack")
                                     ?.toBooleanStrictOrNull() == true,
-                                profileId = args?.getString("profileId")?.toIntOrNull()
-                                    ?.toBooleanStrictOrNull() == true,
+                                profileId = args?.getString("profileId")?.toIntOrNull(),
                                 isRandom = isRandom
                             )
 
