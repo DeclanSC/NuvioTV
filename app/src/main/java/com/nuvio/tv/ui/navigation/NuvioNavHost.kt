@@ -1119,11 +1119,6 @@ fun NuvioNavHost(
                                 )
                                 if (!poppedToStream) {
                                     navController.popBackStack()
-                                } else {
-                                    navController.popBackStack(
-                                        Screen.Stream.route,
-                                        inclusive = true
-                                    )
                                 }
                             }
                         }
