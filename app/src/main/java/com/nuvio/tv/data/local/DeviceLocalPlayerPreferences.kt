@@ -94,12 +94,23 @@ class DeviceLocalPlayerPreferences @Inject constructor(
     }
 
     suspend fun setCustomUserAgent(value: String) {
+        val sanitized = sanitizeUserAgent(value)
         store.edit { prefs ->
-            if (value.isBlank()) {
+            if (sanitized.isBlank()) {
                 prefs.remove(customUserAgentKey)
             } else {
-                prefs[customUserAgentKey] = value
+                prefs[customUserAgentKey] = sanitized
             }
         }
+    }
+
+    private fun sanitizeUserAgent(raw: String): String {
+        val stripped = raw.filter { it.code in 0x20..0x7E }
+            .trim()
+        return stripped.take(MAX_USER_AGENT_LENGTH)
+    }
+
+    companion object {
+        private const val MAX_USER_AGENT_LENGTH = 256
     }
 }
