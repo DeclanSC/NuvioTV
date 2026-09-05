@@ -100,10 +100,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(
-        @ApplicationContext context: Context,
-        userAgentProvider: UserAgentProvider
-    ): OkHttpClient {
+    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
         val trustAllManager = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -121,9 +118,8 @@ object NetworkModule {
             .readTimeout(60, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
-                val defaultUa = "Nuvio/$version"
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", userAgentProvider.currentOrDefault(defaultUa))
+                    .header("User-Agent", "Nuvio/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
                     .build()
                 chain.proceed(request)
@@ -146,6 +142,23 @@ object NetworkModule {
             })
             .build()
     }
+
+    @Provides
+    @Singleton
+    @Named("addon")
+    fun provideAddonOkHttpClient(
+        okHttpClient: OkHttpClient,
+        userAgentProvider: UserAgentProvider
+    ): OkHttpClient = okHttpClient.newBuilder()
+        .addInterceptor { chain ->
+            val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
+            val defaultUa = "Nuvio/$version"
+            val request = chain.request().newBuilder()
+                .header("User-Agent", userAgentProvider.currentOrDefault(defaultUa))
+                .build()
+            chain.proceed(request)
+        }
+        .build()
 
     @Provides
     @Singleton
@@ -291,6 +304,19 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    @Named("addon")
+    fun provideAddonRetrofit(
+        @Named("addon") okHttpClient: OkHttpClient,
+        moshi: Moshi
+    ): Retrofit =
+        Retrofit.Builder()
+            .baseUrl("https://placeholder.nuvio.tv/")
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+
+    @Provides
+    @Singleton
     @Named("tmdb")
     fun provideTmdbRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
         Retrofit.Builder()
@@ -314,7 +340,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideAddonApi(retrofit: Retrofit): AddonApi =
+    fun provideAddonApi(@Named("addon") retrofit: Retrofit): AddonApi =
         retrofit.create(AddonApi::class.java)
 
     @Provides

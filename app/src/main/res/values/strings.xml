@@ -591,7 +591,7 @@
     <string name="advanced_clear_cw_cache_subtitle">Remove cached thumbnails, titles, and enrichment data for Continue Watching</string>
     <string name="advanced_clear_cw_cache_done">Cache cleared</string>
     <string name="advanced_custom_user_agent">Custom User-Agent</string>
-    <string name="advanced_custom_user_agent_subtitle">Set a custom User-Agent for this device</string>
+    <string name="advanced_custom_user_agent_subtitle">Set a custom addon User-Agent for this device</string>
     <string name="advanced_custom_user_agent_placeholder">User-Agent</string>
     <string name="advanced_remember_last_profile">Remember Last Profile</string>
     <string name="advanced_remember_last_profile_subtitle">Remember last selected profile at startup</string>
