@@ -39,6 +39,7 @@ class DeviceLocalPlayerPreferences @Inject constructor(
     private val aspectModeKey = stringPreferencesKey("aspect_mode")
     private val playerStatsHudButtonEnabledKey = booleanPreferencesKey("player_stats_hud_enabled")
     private val playerStatsHudActiveKey = booleanPreferencesKey("player_stats_hud_active")
+    private val customUserAgentKey = stringPreferencesKey("custom_user_agent")
 
     val aspectMode: Flow<AspectMode> = store.data.map { prefs ->
         prefs[aspectModeKey]?.let {
@@ -85,6 +86,20 @@ class DeviceLocalPlayerPreferences @Inject constructor(
     suspend fun setPlayerStatsHudActive(active: Boolean) {
         store.edit { prefs ->
             prefs[playerStatsHudActiveKey] = active
+        }
+    }
+
+    val customUserAgent: Flow<String> = store.data.map { prefs ->
+        prefs[customUserAgentKey] ?: ""
+    }
+
+    suspend fun setCustomUserAgent(value: String) {
+        store.edit { prefs ->
+            if (value.isBlank()) {
+                prefs.remove(customUserAgentKey)
+            } else {
+                prefs[customUserAgentKey] = value
+            }
         }
     }
 }

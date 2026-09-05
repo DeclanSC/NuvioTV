@@ -42,6 +42,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import com.nuvio.tv.core.network.IPv4FirstDns
+import com.nuvio.tv.core.network.UserAgentProvider
 import com.nuvio.tv.core.diagnostics.SentryNetworkBreadcrumbInterceptor
 import java.io.File
 import java.security.SecureRandom
@@ -99,7 +100,10 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
+    fun provideOkHttpClient(
+        @ApplicationContext context: Context,
+        userAgentProvider: UserAgentProvider
+    ): OkHttpClient {
         val trustAllManager = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -117,8 +121,9 @@ object NetworkModule {
             .readTimeout(60, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
+                val defaultUa = "Nuvio/$version"
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "Nuvio/$version")
+                    .header("User-Agent", userAgentProvider.currentOrDefault(defaultUa))
                     .header("Accept-Language", buildAcceptLanguageHeader())
                     .build()
                 chain.proceed(request)
